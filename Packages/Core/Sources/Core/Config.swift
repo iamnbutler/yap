@@ -4,6 +4,7 @@ import Foundation
 ///
 ///     {
 ///       "keepTranscripts": true,
+///       "overlay": true,
 ///       "retentionDays": 30
 ///     }
 ///
@@ -15,6 +16,10 @@ public struct Config: Codable, Equatable, Sendable {
     public var keepTranscripts = true
     /// Days of transcript files to keep; older ones are deleted.
     public var retentionDays = 30
+    /// Show what is being heard while you talk, in a panel at the bottom of
+    /// the screen. Each pause sends the last phrase for transcription, so this
+    /// roughly doubles the audio sent to OpenAI.
+    public var overlay = true
 
     public static var file: URL {
         Paths.support.appendingPathComponent("config.json")
@@ -31,6 +36,9 @@ public struct Config: Codable, Equatable, Sendable {
         retentionDays =
             try container.decodeIfPresent(Int.self, forKey: .retentionDays)
             ?? defaults.retentionDays
+        overlay =
+            try container.decodeIfPresent(Bool.self, forKey: .overlay)
+            ?? defaults.overlay
     }
 
     /// The file's settings, or the defaults when it is missing. A file that

@@ -40,6 +40,12 @@ auto blog => autoblog
 
 **Only the first 25 terms are sent.** More vocabulary measured worse, not better: twelve hard words came back right 18/24 times with the top 15–25 terms, 16/24 with 80, 14/24 with all 153, and 6/24 with none. Keep the list short and ranked, and use fixes for the long tail.
 
+## Overlay
+
+While you talk, a panel at the bottom of the screen shows a waveform and what Yap has heard so far. At each pause, the last phrase is transcribed and added to it. On send, the whole clip is transcribed again and replaces the preview, and that version is what gets typed. The preview is only for watching, so a chunk that fails costs nothing. The panel never takes focus or clicks, so typing still goes to the app you were in.
+
+The chunks roughly double the audio sent to OpenAI. Set `"overlay": false` in `config.json` to turn it off.
+
 ## Transcripts
 
 Every transcript is saved before Yap tries to type it, so a focus change or an app that won't come forward can't lose it. If typing fails you hear the error sound, and the menu says where to find it.
@@ -55,6 +61,7 @@ The menu has checkboxes for **Dictate with Right Command**, **Press Return After
 ```json
 {
   "keepTranscripts": true,
+  "overlay": true,
   "retentionDays": 30
 }
 ```
