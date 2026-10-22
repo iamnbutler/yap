@@ -4,3 +4,4 @@ Yap.xcodeproj/
 .DS_Store
 .env
 xcuserdata/
+.lane/trees/
