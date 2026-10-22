@@ -40,9 +40,26 @@ auto blog => autoblog
 
 **Only the first 25 terms are sent.** More vocabulary measured worse, not better: twelve hard words came back right 18/24 times with the top 15–25 terms, 16/24 with 80, 14/24 with all 153, and 6/24 with none. Keep the list short and ranked, and use fixes for the long tail.
 
+## Transcripts
+
+Every transcript is saved before Yap tries to type it, so a focus change or an app that won't come forward can't lose it. If typing fails you hear the error sound, and the menu says where to find it.
+
+- **Copy Last Transcript** copies the newest one.
+- **Recent Transcripts** lists the last five; click one to copy it. ⚠︎ marks one that never reached its app. **Open Transcripts Folder** is at the bottom.
+- **Keep Transcripts** saves them to `~/Library/Application Support/yap/transcripts/`, one `YYYY-MM-DD.jsonl` file per day, and deletes days older than the retention period (30 by default). With it off, only the last five are kept, in memory, until you quit.
+
 ## Settings
 
-The menu has two checkboxes: **Dictate with Right Command** and **Press Return after dictating** (off, so you can review the text before sending). The model defaults to `gpt-transcribe`. To change it:
+The menu has checkboxes for **Dictate with Right Command**, **Press Return After Dictating** (off, so you can review the text before sending) and **Keep Transcripts**. **Edit Settings…** opens `~/Library/Application Support/yap/config.json`, which you can edit by hand. Any key you leave out uses its default, and changes apply to the next dictation:
+
+```json
+{
+  "keepTranscripts": true,
+  "retentionDays": 30
+}
+```
+
+The model defaults to `gpt-transcribe`. To change it:
 
 ```sh
 defaults write dev.yap.Yap model gpt-4o-transcribe

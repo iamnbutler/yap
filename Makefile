@@ -27,7 +27,18 @@ run: build ## Build, install to /Applications and launch
 	@open "$(INSTALLED)"
 	@echo "launched $(INSTALLED)"
 
-build: generate ## Build the app
+# A lane is reflinked from the main checkout, so it inherits .build directories
+# full of the main checkout's absolute paths, and xcodebuild warns about every
+# file in them. Stamping the root and comparing clears them once per checkout.
+.PHONY: check-root
+check-root:
+	@if [ ! -f $(DERIVED)/.root ] || [ "$$(cat $(DERIVED)/.root 2>/dev/null)" != "$(CURDIR)" ]; then \
+		rm -rf $(DERIVED) Packages/Core/.build; \
+		mkdir -p $(DERIVED); \
+		echo "$(CURDIR)" > $(DERIVED)/.root; \
+	fi
+
+build: check-root generate ## Build the app
 	@xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) \
 		-destination 'platform=macOS,arch=$(ARCH)' \
 		-derivedDataPath $(DERIVED) -quiet build
@@ -35,7 +46,7 @@ build: generate ## Build the app
 generate: ## Regenerate Yap.xcodeproj from project.yml (cached)
 	@xcodegen generate --quiet --use-cache
 
-test: ## Run the Core unit tests
+test: check-root ## Run the Core unit tests
 	@cd Packages/Core && swift test
 
 kill: ## Quit Yap
