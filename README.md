@@ -5,6 +5,7 @@ Dictation for the Mac, built for talking to Claude Code. Hold **Right Command**,
 - **Hold** Right Command to talk; release to send.
 - **Tap** it (under 0.3 s) to record hands free, then tap again to send. A *Tink* starts it and a *Pop* ends it. It sends on its own after 10 minutes.
 - Using Right Command for a shortcut (⌘Tab and so on) cancels the dictation, so shortcuts still work.
+- The key is configurable: see [Key](#key).
 - Clips that are too short or silent are dropped. Transcription models make up words for silence.
 
 Split out of [Hob](https://github.com/iamnbutler/hob), which was doing too much.
@@ -56,15 +57,26 @@ Every transcript is saved before Yap tries to type it, so a focus change or an a
 
 ## Settings
 
-The menu has checkboxes for **Dictate with Right Command**, **Press Return After Dictating** (off, so you can review the text before sending) and **Keep Transcripts**. **Edit Settings…** opens `~/Library/Application Support/yap/config.json`, which you can edit by hand. Any key you leave out uses its default, and changes apply to the next dictation:
+The menu has checkboxes for **Dictate with *key***, **Press Return After Dictating** (off, so you can review the text before sending) and **Keep Transcripts**. **Edit Settings…** opens `~/Library/Application Support/yap/config.json`, which you can edit by hand. Any setting you leave out uses its default. Yap notices a saved edit within two seconds, without a relaunch:
 
 ```json
 {
+  "key": "rightCommand",
   "keepTranscripts": true,
   "overlay": true,
   "retentionDays": 30
 }
 ```
+
+### Key
+
+`key` is the key you hold or tap. It can be:
+
+- **A modifier on its own:** `rightCommand` (the default), `leftCommand`, `rightOption`, `leftOption`, `rightControl`, `leftControl`, `rightShift`, `leftShift` or `fn`. Holding one does nothing else, and using it in a shortcut cancels the dictation.
+- **A function key:** `f1` to `f20`. Yap only listens, so the key still reaches the app in front. Pick one that does nothing there, such as F13 to F20 on a full-size keyboard.
+- **Any key by its code:** `keycode:105`.
+
+Case, spaces and dashes don't matter (`"Right Option"` works), and the usual short forms (`rcmd`, `ralt`, `rctrl`) do too. If Yap doesn't recognize the name, it keeps the last key and says so in the menu.
 
 The model defaults to `gpt-transcribe`. To change it:
 

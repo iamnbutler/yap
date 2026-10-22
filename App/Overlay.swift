@@ -264,7 +264,7 @@ struct OverlayView: View {
     private var label: String {
         switch model.phase {
         case .listening: "REC"
-        case .handsFree: "REC · HANDS FREE · TAP ⌘ TO SEND"
+        case .handsFree: "REC · HANDS FREE · TAP AGAIN TO SEND"
         case .transcribing: "TRANSCRIBING"
         case .typed: "TYPED"
         case .failed: "NOT TYPED · IN RECENT TRANSCRIPTS"

@@ -4,7 +4,7 @@ import Core
 import Observation
 import Synchronization
 
-/// Hold Right Command, speak, release: OpenAI transcribes the clip and Yap
+/// Hold the key (Right Command unless config.json says otherwise), speak, release: OpenAI transcribes the clip and Yap
 /// types the text into whatever app was frontmost when the key went down.
 ///
 /// Or tap it: a press shorter than `tapLimit` latches the recording on, hands
@@ -22,12 +22,15 @@ final class Yap {
     }
 
     private(set) var state: State = .idle
-    private(set) var detail = Yap.ready
+    private(set) var detail = ""
     /// Recording hands free, after a tap, rather than for as long as the key
     /// is held.
     private(set) var latched = false
 
-    private static let ready = "Hold Right Command to dictate, or tap to start and tap to send"
+    /// The dictation key's name, for the menu and status text.
+    private(set) var keyName = Hotkey.rightCommand.name
+
+    private var ready: String { "Hold \(keyName) to dictate, or tap to start and tap to send" }
 
     /// The newest transcripts, newest first, whether or not they are kept on
     /// disk. What the menu copies from.
@@ -107,12 +110,8 @@ final class Yap {
         enabled = defaults.bool(forKey: Self.enabledKey)
         submits = defaults.bool(forKey: Self.submitsKey)
 
-        do {
-            config = try Config.load()
-        } catch {
-            config = Config()
-            detail = "config.json won't parse, using defaults: \(error.localizedDescription)"
-        }
+        config = Config()
+        reloadConfig()
         if config.keepTranscripts {
             log.prune(keepingDays: config.retentionDays)
             recent = log.recent(Self.recentLimit)
@@ -180,6 +179,49 @@ final class Yap {
         key.onUp = { [weak self] in self?.end() }
         key.onChord = { [weak self] in self?.chorded = true }
         key.start()
+        watchConfig()
+    }
+
+    /// Reads config.json and applies it: the key changes at once, everything
+    /// else at the next dictation. A file that won't parse, or a key name Yap
+    /// doesn't know, keeps the last good setting and says so in the menu.
+    private func reloadConfig() {
+        let loaded: Config
+        do {
+            loaded = try Config.load()
+        } catch {
+            detail = "config.json won't parse, keeping the last settings: \(error.localizedDescription)"
+            return
+        }
+        config = loaded
+        guard let hotkey = loaded.hotkey else {
+            detail = "config.json: no key called \"\(loaded.key)\", still using \(keyName)"
+            return
+        }
+        key.hotkey = hotkey
+        keyName = hotkey.name
+        if state == .idle { detail = ready }
+    }
+
+    /// Polls config.json's modification date, so a hand edit applies without
+    /// a relaunch. A file watch would miss editors that save in place, and a
+    /// stat every two seconds costs nothing.
+    private func watchConfig() {
+        let modified = { () -> Date? in
+            try? FileManager.default.attributesOfItem(atPath: Config.file.path)[.modificationDate]
+                as? Date
+        }
+        var last = modified()
+        Task { [weak self] in
+            while true {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                let now = modified()
+                guard now != last else { continue }
+                last = now
+                self.reloadConfig()
+            }
+        }
     }
 
     /// Re-measured when the menu opens: you have often just come back from
@@ -198,7 +240,6 @@ final class Yap {
         recording += 1
         target = NSWorkspace.shared.frontmostApplication
         recorder.reset()
-        if let reloaded = try? Config.load() { config = reloaded }
 
         guard
             let format = AVAudioFormat(
@@ -230,11 +271,11 @@ final class Yap {
             capture.stop()
             recorder.reset()
             stopLive()
-            return finish(Self.ready)
+            return finish(ready)
         }
         if !latched, pressedAt.duration(to: .now) < Self.tapLimit {
             latched = true
-            detail = "Recording hands free. Tap Right Command to send."
+            detail = "Recording hands free. Tap \(keyName) to send."
             NSSound(named: "Tink")?.play()
             overlay.update(recording, phase: .handsFree)
             let recording = recording
@@ -400,7 +441,7 @@ final class Yap {
         if state == .recording { capture.stop() }
         stopLive()
         state = .idle
-        detail = Self.ready
+        detail = ready
     }
 
     /// Ends a clip. A transcript can land after the next recording has

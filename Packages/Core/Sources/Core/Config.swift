@@ -3,6 +3,7 @@ import Foundation
 /// Settings you can edit by hand: `config.json` in the support directory.
 ///
 ///     {
+///       "key": "rightCommand",
 ///       "keepTranscripts": true,
 ///       "overlay": true,
 ///       "retentionDays": 30
@@ -20,6 +21,12 @@ public struct Config: Codable, Equatable, Sendable {
     /// the screen. Each pause sends the last phrase for transcription, so this
     /// roughly doubles the audio sent to OpenAI.
     public var overlay = true
+    /// The key to hold or tap, by name: see `Hotkey`. Kept as written, so a
+    /// name Yap does not know survives a save from the menu and can be fixed.
+    public var key = "rightCommand"
+
+    /// `key` as a key, or nil when the name is not one Yap knows.
+    public var hotkey: Hotkey? { Hotkey(key) }
 
     public static var file: URL {
         Paths.support.appendingPathComponent("config.json")
@@ -39,6 +46,9 @@ public struct Config: Codable, Equatable, Sendable {
         overlay =
             try container.decodeIfPresent(Bool.self, forKey: .overlay)
             ?? defaults.overlay
+        key =
+            try container.decodeIfPresent(String.self, forKey: .key)
+            ?? defaults.key
     }
 
     /// The file's settings, or the defaults when it is missing. A file that
