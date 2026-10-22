@@ -29,6 +29,25 @@ final class Yap {
 
     private static let ready = "Hold Right Command to dictate, or tap to start and tap to send"
 
+    /// The newest transcripts, newest first, whether or not they are kept on
+    /// disk. What the menu copies from.
+    private(set) var recent: [Transcript] = []
+    static let recentLimit = 5
+
+    /// Re-read before every clip, so a hand edit to config.json applies to the
+    /// next dictation; the menu writes it back through `keepsTranscripts`.
+    private(set) var config: Config
+
+    var keepsTranscripts: Bool {
+        get { config.keepTranscripts }
+        set {
+            config.keepTranscripts = newValue
+            do { try config.save() } catch { detail = "Couldn't save settings: \(error.localizedDescription)" }
+        }
+    }
+
+    @ObservationIgnored private let log = TranscriptLog()
+
     var enabled: Bool {
         didSet {
             UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
@@ -82,6 +101,53 @@ final class Yap {
         defaults.register(defaults: [Self.enabledKey: true, Self.submitsKey: false])
         enabled = defaults.bool(forKey: Self.enabledKey)
         submits = defaults.bool(forKey: Self.submitsKey)
+
+        do {
+            config = try Config.load()
+        } catch {
+            config = Config()
+            detail = "config.json won't parse, using defaults: \(error.localizedDescription)"
+        }
+        if config.keepTranscripts {
+            log.prune(keepingDays: config.retentionDays)
+            recent = log.recent(Self.recentLimit)
+        }
+    }
+
+    func copy(_ transcript: Transcript) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript.text, forType: .string)
+    }
+
+    func openTranscriptsFolder() {
+        try? FileManager.default.createDirectory(
+            at: log.directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        NSWorkspace.shared.open(log.directory)
+    }
+
+    /// Writes the defaults out first if there is no file yet, so there is
+    /// always something to edit.
+    func openConfig() {
+        if !FileManager.default.fileExists(atPath: Config.file.path) {
+            try? config.save()
+        }
+        NSWorkspace.shared.open(Config.file)
+    }
+
+    /// Kept before anything else can go wrong with it. Typing is the step that
+    /// fails (a focus change, an app that will not come forward), and a long
+    /// dictation lost to that is the reason this exists.
+    private func remember(_ transcript: Transcript) {
+        recent.insert(transcript, at: 0)
+        recent = Array(recent.prefix(Self.recentLimit))
+        guard config.keepTranscripts else { return }
+        do {
+            try log.append(transcript)
+            log.prune(keepingDays: config.retentionDays)
+        } catch {
+            detail = "Couldn't save the transcript: \(error.localizedDescription)"
+        }
     }
 
     /// Without Accessibility the key monitor hears nothing and typing is
@@ -90,6 +156,16 @@ final class Yap {
 
     func start() {
         trusted = PushToTalk.ensureAccessibilityPermission()
+        // A native menu has no "on open" hook to re-measure from, so poll
+        // until the grant lands; the warning item disappears when it does.
+        if !trusted {
+            Task {
+                while !trusted {
+                    try? await Task.sleep(for: .seconds(2))
+                    refreshTrust()
+                }
+            }
+        }
         key.onDown = { [weak self] in self?.begin() }
         key.onUp = { [weak self] in self?.end() }
         key.onChord = { [weak self] in self?.chorded = true }
@@ -179,6 +255,8 @@ final class Yap {
         // Read per clip, like the key, so an edit applies to the next dictation.
         let dictionary = DictationDictionary.load()
         let submits = submits
+        let app = target?.localizedName
+        if let reloaded = try? Config.load() { config = reloaded }
 
         Task {
             do {
@@ -191,13 +269,23 @@ final class Yap {
                 let text = dictionary.apply(to: heard)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let elapsed = started.duration(to: .now)
-                guard turn == self.turn else { return }
                 guard !text.isEmpty else { return finish("Heard nothing") }
 
-                // A trailing space so the next dictation does not fuse onto
-                // this one's last word.
-                try await TextInjector.type(submits ? text : text + " ", into: pid, submit: submits)
-                finish("Typed \(text.count) characters (\(Self.format(elapsed)) round trip)")
+                var transcript = Transcript(text: text, app: app)
+                // Cancelled while in flight: not typed, but still kept.
+                guard turn == self.turn else { return remember(transcript) }
+                do {
+                    // A trailing space so the next dictation does not fuse
+                    // onto this one's last word.
+                    try await TextInjector.type(
+                        submits ? text : text + " ", into: pid, submit: submits)
+                    transcript.typed = true
+                    finish("Typed \(text.count) characters (\(Self.format(elapsed)) round trip)")
+                } catch {
+                    NSSound(named: "Basso")?.play()
+                    finish("Couldn't type it (\(error.localizedDescription)). It's in Recent Transcripts.")
+                }
+                remember(transcript)
             } catch {
                 guard turn == self.turn else { return }
                 finish(error.localizedDescription)
