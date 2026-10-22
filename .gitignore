@@ -1,0 +1,6 @@
+.build/
+Packages/Core/.build/
+Yap.xcodeproj/
+.DS_Store
+.env
+xcuserdata/

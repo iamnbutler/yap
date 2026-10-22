@@ -1,0 +1,57 @@
+name: Yap
+options:
+  bundleIdPrefix: dev.yap
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+packages:
+  Core:
+    path: Packages/Core
+
+targets:
+  Yap:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: Core
+        product: Core
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundleDisplayName: "$(PRODUCT_NAME)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        # A menu bar utility: no Dock icon, no app menu.
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "Yap listens while you hold or tap Right Command."
+    entitlements:
+      path: App/Yap.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.audio-input: true
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yap.Yap
+        PRODUCT_NAME: Yap
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        SUPPORTED_PLATFORMS: macosx
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        # A real certificate, not ad-hoc. TCC keys a grant on the bundle id and
+        # the signing certificate; an ad-hoc signature is keyed on its cdhash,
+        # which changes every build, so every rebuild would ask for
+        # Accessibility and the microphone again.
+        DEVELOPMENT_TEAM: 8S43JJMN6B
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        ENABLE_HARDENED_RUNTIME: YES
