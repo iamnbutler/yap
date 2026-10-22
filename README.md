@@ -95,3 +95,7 @@ defaults write dev.yap.Yap model gpt-4o-transcribe
 | `project.yml` | XcodeGen spec. Run `make generate` before opening the project in Xcode. |
 
 `make test` runs the Core tests.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
