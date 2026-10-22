@@ -1,15 +1,27 @@
 import AppKit
+import Core
 
-/// Watches Right Command: press, release, and whether another key went down
-/// while it was held.
+/// Watches the dictation key: press, release, and whether another key went
+/// down while it was held.
 ///
-/// A bare modifier rather than a chord, so holding it costs nothing, and Right
-/// Command rather than Right Option, which Hob uses. Another key during the
-/// hold means it was a shortcut (Right Command-Tab, say), reported through
-/// `onChord` so the caller can drop it.
+/// Right Command unless config.json says otherwise. A bare modifier by
+/// default, so holding it costs nothing; another key during the hold means it
+/// was a shortcut (Right Command-Tab, say), reported through `onChord` so the
+/// caller can drop it.
+///
+/// An ordinary key (F13, say) works too, but a global monitor only listens:
+/// the key still reaches the app in front. Pick one that does nothing there.
 @MainActor
 final class PushToTalk {
-    static let rightCommandKeyCode: UInt16 = 54
+    var hotkey = Hotkey.rightCommand {
+        didSet {
+            // Mid-hold, the old key's release would never be heard.
+            if hotkey != oldValue, isDown {
+                isDown = false
+                onUp?()
+            }
+        }
+    }
 
     var onDown: (() -> Void)?
     var onUp: (() -> Void)?
@@ -30,27 +42,38 @@ final class PushToTalk {
     func start() {
         guard monitors.isEmpty else { return }
 
-        let flags: (NSEvent) -> Void = { [weak self] in self?.handle($0) }
-        let keys: (NSEvent) -> Void = { [weak self] _ in
-            guard let self, self.isDown else { return }
-            self.onChord?()
-        }
+        let handler: (NSEvent) -> Void = { [weak self] in self?.handle($0) }
+        let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
         // Local monitors too, so the key also works while Yap's menu is open.
         monitors = [
-            NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged], handler: flags),
-            NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { flags($0); return $0 },
-            NSEvent.addGlobalMonitorForEvents(matching: [.keyDown], handler: keys),
-            NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { keys($0); return $0 },
+            NSEvent.addGlobalMonitorForEvents(matching: events, handler: handler),
+            NSEvent.addLocalMonitorForEvents(matching: events) { handler($0); return $0 },
         ].compactMap { $0 }
     }
 
     private func handle(_ event: NSEvent) {
-        guard event.keyCode == Self.rightCommandKeyCode else { return }
+        let ours = event.keyCode == hotkey.keyCode
+        switch event.type {
+        case .flagsChanged:
+            guard ours, let flag = hotkey.modifierFlag else { return }
+            // flagsChanged fires for both press and release; the flag tells us which.
+            set(down: event.modifierFlags.rawValue & flag != 0)
+        case .keyDown where ours && !hotkey.isModifier:
+            // Holding a key repeats key down; only the first one is a press.
+            guard !event.isARepeat else { return }
+            set(down: true)
+        case .keyUp where ours && !hotkey.isModifier:
+            set(down: false)
+        case .keyDown where isDown:
+            onChord?()
+        default:
+            break
+        }
+    }
 
-        // flagsChanged fires for both press and release; the flag tells us which.
-        let pressed = event.modifierFlags.contains(.command)
-        guard pressed != isDown else { return }
-        isDown = pressed
-        pressed ? onDown?() : onUp?()
+    private func set(down: Bool) {
+        guard down != isDown else { return }
+        isDown = down
+        down ? onDown?() : onUp?()
     }
 }

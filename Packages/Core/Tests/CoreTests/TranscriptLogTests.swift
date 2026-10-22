@@ -98,3 +98,36 @@ final class ConfigTests: XCTestCase {
         XCTAssertThrowsError(try Config.load(from: url))
     }
 }
+
+final class HotkeyTests: XCTestCase {
+    func testModifiersByNameAndAlias() {
+        XCTAssertEqual(Hotkey("rightCommand"), .rightCommand)
+        XCTAssertEqual(Hotkey("Right Command"), .rightCommand)
+        XCTAssertEqual(Hotkey("rcmd"), .rightCommand)
+        XCTAssertEqual(Hotkey("right_alt")?.name, "Right Option")
+        XCTAssertEqual(Hotkey("fn")?.keyCode, 63)
+        XCTAssertTrue(Hotkey("leftShift")?.isModifier == true)
+    }
+
+    func testOrdinaryKeys() {
+        let f13 = Hotkey("F13")
+        XCTAssertEqual(f13?.keyCode, 105)
+        XCTAssertEqual(f13?.name, "F13")
+        XCTAssertEqual(f13?.isModifier, false)
+        XCTAssertNil(Hotkey("f21"))
+        XCTAssertEqual(Hotkey("keycode:105")?.keyCode, 105)
+        // A modifier's code is still that modifier.
+        XCTAssertEqual(Hotkey("keycode:54"), .rightCommand)
+    }
+
+    func testUnknownNamesAreNil() {
+        XCTAssertNil(Hotkey("hyper"))
+        XCTAssertNil(Hotkey(""))
+    }
+
+    func testConfigDefaultsToRightCommand() throws {
+        XCTAssertEqual(Config().hotkey, .rightCommand)
+        let config = try JSONDecoder().decode(Config.self, from: Data(#"{"key": "f13"}"#.utf8))
+        XCTAssertEqual(config.hotkey?.name, "F13")
+    }
+}

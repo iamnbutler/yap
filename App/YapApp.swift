@@ -59,7 +59,7 @@ struct YapMenu: View {
 
         Divider()
         Toggle(
-            "Dictate with Right Command",
+            "Dictate with \(yap.keyName)",
             isOn: Binding(get: { yap.enabled }, set: { yap.enabled = $0 }))
         Toggle(
             "Press Return After Dictating",
