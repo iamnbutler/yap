@@ -8,7 +8,7 @@ Dictation for the Mac, built for talking to Claude Code. Hold **Right Command**,
 - The key is configurable: see [Key](#key).
 - Clips that are too short or silent are dropped. Transcription models make up words for silence.
 
-Split out of [Hob](https://github.com/iamnbutler/hob), which was doing too much.
+Split out of Hob, a voice assistant that was doing too much.
 
 ## Setup
 
@@ -16,6 +16,8 @@ Split out of [Hob](https://github.com/iamnbutler/hob), which was doing too much.
 brew install xcodegen   # once
 make run                # build, install to /Applications/Yap.app, launch
 ```
+
+Building it yourself? `project.yml` signs with my Apple team (`DEVELOPMENT_TEAM`). Change it to yours. It has to be a real certificate, not ad-hoc: macOS ties the Accessibility and Microphone grants to the signature, so an ad-hoc build asks for them again after every rebuild.
 
 Grant Accessibility (to hear the key and type) and Microphone when asked. The menu bar icon's menu tells you if Accessibility is missing.
 
