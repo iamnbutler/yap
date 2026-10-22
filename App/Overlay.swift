@@ -20,6 +20,9 @@ final class Overlay {
     /// next recording has begun, and must not overwrite it or hide it.
     private var owner = 0
     private var hiding: Task<Void, Never>?
+    /// The screen the panel was shown on; it stays there as it grows.
+    private var screen: NSScreen?
+    private var resizing: NSObjectProtocol?
 
     init(level: @escaping @MainActor () -> Float) {
         renderer = WaveRenderer(level: level)
@@ -30,7 +33,11 @@ final class Overlay {
         hiding?.cancel()
         model.text = ""
         model.phase = .listening
+        model.started = .now
+        model.stopped = nil
+        renderer.reset()
         renderer.active = true
+        renderer.tint = model.tint
         show()
     }
 
@@ -39,6 +46,14 @@ final class Overlay {
         if let phase { model.phase = phase }
         if let text { model.text = text }
         renderer.active = model.phase == .listening || model.phase == .handsFree
+        renderer.tint = model.tint
+        if !renderer.active, model.stopped == nil { model.stopped = .now }
+    }
+
+    /// A chunk was cut `seconds` into the recording: an orange mark on the tape.
+    func mark(_ recording: Int, at seconds: Double) {
+        guard recording == owner else { return }
+        renderer.mark(Float(seconds))
     }
 
     /// Hides now, or after `delay` so a final transcript can be read.
@@ -62,17 +77,21 @@ final class Overlay {
         let panel = panel ?? makePanel()
         self.panel = panel
         renderer.paused = false
+        screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         place(panel)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
-    /// Bottom centre of the screen you are working on, above the Dock.
+    /// Bottom centre of the screen the pointer is on, above the Dock. Again on
+    /// every resize: the hosting controller keeps the top edge when the
+    /// content grows, which would walk the panel down off the screen.
     private func place(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
+        guard let screen else { return }
         let size = panel.frame.size
         let area = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.minY + 72))
+        let origin = NSPoint(x: area.midX - size.width / 2, y: area.minY + 56)
+        if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
     }
 
     private func makePanel() -> NSPanel {
@@ -93,7 +112,61 @@ final class Overlay {
         let host = NSHostingController(rootView: OverlayView(model: model, renderer: renderer))
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
+        resizing = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification, object: panel, queue: .main
+        ) { [weak self, weak panel] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel else { return }
+                self.place(panel)
+            }
+        }
         return panel
+    }
+}
+
+extension Overlay {
+    /// The overlay on a loop: listening with cuts landing, hands free,
+    /// transcribing, typed. The level is a made-up voice: syllables, with a
+    /// pause every few seconds.
+    static func demo() -> Overlay {
+        let started = ContinuousClock.now
+        let overlay = Overlay {
+            let d = started.duration(to: .now)
+            let t = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+            let phrase = t.truncatingRemainder(dividingBy: 3.2)
+            guard phrase < 2.5 else { return 0.02 }
+            let syllables = abs(sin(t * 9)) * (0.55 + 0.45 * sin(t * 1.7))
+            return Float(min(1, 0.15 + syllables * 0.8))
+        }
+        let words = [
+            "So the overlay should feel like a little tape machine,",
+            "with the reel turning while I talk",
+            "and an orange mark on the tape wherever a phrase was cut.",
+        ]
+        Task { @MainActor in
+            var run = 0
+            while true {
+                run += 1
+                overlay.begin(run)
+                var heard: [String] = []
+                for (index, phrase) in words.enumerated() {
+                    try? await Task.sleep(for: .seconds(3.2))
+                    heard.append(phrase)
+                    overlay.mark(run, at: 2.75 + Double(index) * 3.2)
+                    overlay.update(run, text: heard.joined(separator: " "))
+                    if index == 1 { overlay.update(run, phase: .handsFree) }
+                }
+                try? await Task.sleep(for: .seconds(1))
+                overlay.update(run, phase: .transcribing)
+                try? await Task.sleep(for: .seconds(3))
+                overlay.update(
+                    run, phase: .typed,
+                    text: "So the overlay should feel like a little tape machine, with the reel turning "
+                        + "while I talk, and an orange mark on the tape wherever a phrase was cut.")
+                try? await Task.sleep(for: .seconds(4))
+            }
+        }
+        return overlay
     }
 }
 
@@ -106,39 +179,80 @@ final class OverlayModel {
 
     var phase = Phase.listening
     var text = ""
+    var started = Date.now
+    /// When the recording ended; the clock stops there.
+    var stopped: Date?
+
+    var tint: Color {
+        switch phase {
+        case .listening, .failed: Palette.red
+        case .handsFree: Palette.orange
+        case .transcribing: Palette.blue
+        case .typed: Palette.cream
+        }
+    }
+}
+
+/// Teenage Engineering's display colours, more or less. Matches the constants
+/// in Overlay.metal.
+enum Palette {
+    static let cream = Color(red: 0.93, green: 0.91, blue: 0.86)
+    static let blue = Color(red: 0.38, green: 0.60, blue: 1.00)
+    static let orange = Color(red: 1.00, green: 0.62, blue: 0.20)
+    static let red = Color(red: 1.00, green: 0.30, blue: 0.18)
+    static let edge = Color(white: 0.17)
 }
 
 struct OverlayView: View {
-    static let width: CGFloat = 560
+    static let width: CGFloat = 520
     /// Enough for about four lines; earlier text scrolls off the top.
-    private static let shown = 300
+    private static let shown = 280
 
     let model: OverlayModel
     let renderer: WaveRenderer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 7) {
+                Circle()
+                    .fill(model.tint)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: model.tint.opacity(0.8), radius: 3)
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold).width(.expanded))
+                    .tracking(1.4)
+                    .foregroundStyle(model.tint)
+                Spacer()
+                TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                    Text(clock(at: context.date))
+                        .font(.system(size: 22, weight: .thin).width(.expanded).monospacedDigit())
+                        .foregroundStyle(Palette.cream)
+                }
+            }
             WaveView(renderer: renderer)
-                .frame(height: 30)
+                .frame(height: 58)
             if !model.text.isEmpty {
+                Rectangle()
+                    .fill(Palette.edge)
+                    .frame(height: 1)
                 Text(tail)
-                    .font(.system(size: 15))
-                    .foregroundStyle(model.phase == .typed ? .primary : .secondary)
+                    .font(.system(size: 14))
+                    .lineSpacing(3)
+                    .foregroundStyle(Palette.cream.opacity(model.phase == .typed ? 1 : 0.6))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text(status)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(model.phase == .failed ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .frame(width: Self.width)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(.black, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.12)))
-        .padding(12)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Palette.edge, lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
+        .padding(18)
         .animation(.easeOut(duration: 0.15), value: model.text)
     }
 
@@ -147,14 +261,19 @@ struct OverlayView: View {
         return "…" + model.text.suffix(Self.shown)
     }
 
-    private var status: String {
+    private var label: String {
         switch model.phase {
-        case .listening: "Listening"
-        case .handsFree: "Hands free · tap Right Command to send"
-        case .transcribing: "Transcribing the whole clip…"
-        case .typed: "Typed"
-        case .failed: "Couldn't type it · it's in Recent Transcripts"
+        case .listening: "REC"
+        case .handsFree: "REC · HANDS FREE · TAP ⌘ TO SEND"
+        case .transcribing: "TRANSCRIBING"
+        case .typed: "TYPED"
+        case .failed: "NOT TYPED · IN RECENT TRANSCRIPTS"
         }
+    }
+
+    private func clock(at now: Date) -> String {
+        let seconds = Int((model.stopped ?? now).timeIntervalSince(model.started))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -168,21 +287,29 @@ private struct WaveView: NSViewRepresentable {
     func updateNSView(_ view: MTKView, context: Context) {}
 }
 
-/// Matches `Uniforms` in Overlay.metal.
+/// Matches `Uniforms` in Overlay.metal, field for field.
 private struct WaveUniforms {
+    var tint: SIMD4<Float>
+    var size: SIMD2<Float>
     var time: Float
     var count: Float
     var active: Float
+    var elapsed: Float
+    var cutCount: Float
+    var scale: Float
 }
 
-/// Draws the waveform in Metal, so it can grow into something nicer than a
-/// meter without fighting SwiftUI for frames.
+/// Draws the display in Metal, so it can keep growing without fighting
+/// SwiftUI for frames.
 @MainActor
 final class WaveRenderer: NSObject, MTKViewDelegate {
-    /// A second and a half of level at 60 frames a second.
-    private static let history = 90
+    /// About two seconds of level at 60 frames a second.
+    private static let history = 120
+    /// The shader takes a fixed-size array; older cuts have scrolled off.
+    private static let maximumCuts = 32
 
     var active = true
+    var tint = Palette.red
     var paused = true {
         didSet { view?.isPaused = paused }
     }
@@ -194,17 +321,34 @@ final class WaveRenderer: NSObject, MTKViewDelegate {
     private weak var view: MTKView?
     private var levels = [Float](repeating: 0, count: WaveRenderer.history)
     private var shown: Float = 0
+    private var cuts: [Float] = []
+    /// Seconds of tape: advances only while recording, so the ruler and the
+    /// reel stop when you do.
+    private var elapsed: Float = 0
+    private var lastFrame = ContinuousClock.now
     private let started = ContinuousClock.now
 
     init(level: @escaping @MainActor () -> Float) {
         self.level = level
     }
 
+    func reset() {
+        elapsed = 0
+        cuts = []
+        shown = 0
+        levels = [Float](repeating: 0, count: Self.history)
+        lastFrame = .now
+    }
+
+    func mark(_ seconds: Float) {
+        cuts.append(seconds)
+        if cuts.count > Self.maximumCuts { cuts.removeFirst() }
+    }
+
     func makeView() -> MTKView {
         let view = MTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm
-        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        view.layer?.isOpaque = false
+        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         view.preferredFramesPerSecond = 60
         view.isPaused = paused
         view.delegate = self
@@ -228,10 +372,13 @@ final class WaveRenderer: NSObject, MTKViewDelegate {
     }
 
     private func render(in view: MTKView) {
+        let now = ContinuousClock.now
+        if active { elapsed += Self.seconds(lastFrame.duration(to: now)) }
+        lastFrame = now
+
         // Rises at once and falls slowly, so speech reads as a shape rather
         // than flicker.
-        let now = active ? level() : 0
-        shown = max(now, shown * 0.9)
+        shown = max(active ? level() : 0, shown * 0.9)
         levels.removeFirst()
         levels.append(shown)
 
@@ -242,18 +389,35 @@ final class WaveRenderer: NSObject, MTKViewDelegate {
             let encoder = buffer.makeRenderCommandEncoder(descriptor: pass)
         else { return }
 
-        let elapsed = started.duration(to: .now)
+        let resolved = NSColor(tint).usingColorSpace(.sRGB) ?? .white
         var uniforms = WaveUniforms(
-            time: Float(elapsed.components.seconds) + Float(elapsed.components.attoseconds) / 1e18,
-            count: Float(levels.count), active: active ? 1 : 0)
+            tint: SIMD4(
+                Float(resolved.redComponent), Float(resolved.greenComponent),
+                Float(resolved.blueComponent), 1),
+            size: SIMD2(Float(view.drawableSize.width), Float(view.drawableSize.height)),
+            time: Self.seconds(started.duration(to: now)),
+            count: Float(levels.count),
+            active: active ? 1 : 0,
+            elapsed: elapsed,
+            cutCount: Float(cuts.count),
+            scale: Float(view.window?.backingScaleFactor ?? 2))
+        var cutBuffer = cuts + [Float](repeating: 0, count: Self.maximumCuts - cuts.count)
+
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaveUniforms>.stride, index: 0)
         levels.withUnsafeBytes { bytes in
             encoder.setFragmentBytes(bytes.baseAddress!, length: bytes.count, index: 1)
         }
+        cutBuffer.withUnsafeMutableBytes { bytes in
+            encoder.setFragmentBytes(bytes.baseAddress!, length: bytes.count, index: 2)
+        }
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.commit()
+    }
+
+    private static func seconds(_ duration: Duration) -> Float {
+        Float(duration.components.seconds) + Float(duration.components.attoseconds) / 1e18
     }
 }

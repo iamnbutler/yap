@@ -90,6 +90,7 @@ final class Yap {
     /// Transcribes chunks for the overlay while recording. Display only: the
     /// typed text always comes from the whole clip.
     @ObservationIgnored private var live: Task<Void, Never>?
+    @ObservationIgnored private var demo: Overlay?
     @ObservationIgnored private var target: NSRunningApplication?
     @ObservationIgnored private var chorded = false
     @ObservationIgnored private var pressedAt = ContinuousClock.now
@@ -169,6 +170,11 @@ final class Yap {
                     refreshTrust()
                 }
             }
+        }
+        // YAP_OVERLAY_DEMO=1 plays the overlay on a loop with made-up audio,
+        // to look at it without talking.
+        if ProcessInfo.processInfo.environment["YAP_OVERLAY_DEMO"] != nil {
+            demo = Overlay.demo()
         }
         key.onDown = { [weak self] in self?.begin() }
         key.onUp = { [weak self] in self?.end() }
@@ -352,6 +358,7 @@ final class Yap {
                 guard taken > 0 else { continue }
                 let chunk = self.recorder.recorded(after: offset).prefix(taken)
                 offset += taken
+                self.overlay.mark(shown, at: Double(offset) / 2 / Self.sampleRate)
                 guard PCMRecorder.peak(of: chunk) >= Self.silencePeak,
                     let apiKey = try? Secrets.openAIAPIKey()
                 else { continue }
