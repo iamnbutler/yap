@@ -6,7 +6,9 @@ import Foundation
 ///       "key": "rightCommand",
 ///       "keepTranscripts": true,
 ///       "overlay": true,
-///       "retentionDays": 30
+///       "retentionDays": 30,
+///       "engine": "onDevice",
+///       "refine": true
 ///     }
 ///
 /// A missing file or a missing key falls back to its default, so the file
@@ -24,6 +26,17 @@ public struct Config: Codable, Equatable, Sendable {
     /// The key to hold or tap, by name: see `Hotkey`. Kept as written, so a
     /// name Yap does not know survives a save from the menu and can be fixed.
     public var key = "rightCommand"
+    /// Who transcribes: `onDevice` (Apple's model, free and private) or
+    /// `openAI` (better with jargon, with your key). Either falls back to the
+    /// other when it fails and the other can run.
+    public var engine = Engine.onDevice
+    /// Clean up on-device transcripts with Apple Intelligence: punctuation,
+    /// filler words, false starts. OpenAI's transcripts don't need it.
+    public var refine = true
+
+    public enum Engine: String, Codable, Sendable, CaseIterable {
+        case onDevice, openAI
+    }
 
     /// `key` as a key, or nil when the name is not one Yap knows.
     public var hotkey: Hotkey? { Hotkey(key) }
@@ -49,6 +62,14 @@ public struct Config: Codable, Equatable, Sendable {
         key =
             try container.decodeIfPresent(String.self, forKey: .key)
             ?? defaults.key
+        // An engine this version doesn't know falls back, rather than
+        // failing the whole file.
+        engine =
+            (try? container.decodeIfPresent(Engine.self, forKey: .engine))
+            .flatMap { $0 } ?? defaults.engine
+        refine =
+            try container.decodeIfPresent(Bool.self, forKey: .refine)
+            ?? defaults.refine
     }
 
     /// The file's settings, or the defaults when it is missing. A file that
