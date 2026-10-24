@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: dev.yap
   deploymentTarget:
     macOS: "26.0"
+    iOS: "26.0"
   createIntermediateGroups: true
 
 packages:
@@ -55,3 +56,101 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "Apple Development"
         ENABLE_HARDENED_RUNTIME: YES
+
+  # iOS: an app that records, and a keyboard that asks it to. See Bridge.swift
+  # for why the keyboard can't record itself.
+  YapPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: iOS/App
+      - path: App/AudioCapture.swift
+      - path: App/PCMRecorder.swift
+    dependencies:
+      - package: Core
+        product: Core
+      - target: YapKeyboard
+    info:
+      path: iOS/App/Info.plist
+      properties:
+        CFBundleName: Yap
+        CFBundleDisplayName: Yap
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSMicrophoneUsageDescription: "Yap listens when you tap the microphone on its keyboard, and transcribes what you say."
+        # Keeps a session's microphone open while you're in another app.
+        UIBackgroundModes: [audio]
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.yap.Yap
+            CFBundleURLSchemes: [yap]
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # iPad multitasking requires all four.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: iOS/App/Yap.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.yap.Yap]
+    scheme:
+      gatherCoverageData: false
+    settings:
+      base: &ios
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yap.Yap
+        PRODUCT_NAME: YapPhone
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        DEVELOPMENT_TEAM: 8S43JJMN6B
+        CODE_SIGN_STYLE: Automatic
+
+  YapKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: iOS/Keyboard
+    dependencies:
+      - package: Core
+        product: Core
+    info:
+      path: iOS/Keyboard/Info.plist
+      properties:
+        CFBundleName: Yap
+        CFBundleDisplayName: Yap
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).KeyboardViewController"
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            # Full Access: the app group, and so the app, is out of reach
+            # without it.
+            RequestsOpenAccess: true
+    entitlements:
+      path: iOS/Keyboard/Keyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.yap.Yap]
+    settings:
+      base:
+        <<: *ios
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yap.Yap.Keyboard
+        PRODUCT_NAME: YapKeyboard
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""

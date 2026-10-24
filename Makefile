@@ -2,6 +2,8 @@
 #
 #   make run    build, install to /Applications and launch
 #   make test   Core unit tests
+#   make ios    build the iPhone app and keyboard for the simulator
+#   make testflight  archive the iPhone app and upload it to TestFlight
 
 SCHEME    := Yap
 PROJECT   := Yap.xcodeproj
@@ -13,7 +15,7 @@ BUILT     := $(DERIVED)/Build/Products/$(CONFIG)/Yap.app
 INSTALLED := /Applications/Yap.app
 
 .DEFAULT_GOAL := help
-.PHONY: help run build generate test kill logs clean
+.PHONY: help run build generate test kill logs clean ios testflight
 
 help: ## Show this help
 	@awk -F'##' '/^[a-z][a-z-]*:.*##/ { split($$1, a, ":"); printf "  \033[1m%-9s\033[0m %s\n", a[1], $$2 }' $(MAKEFILE_LIST)
@@ -45,6 +47,25 @@ build: check-root generate ## Build the app
 
 generate: ## Regenerate Yap.xcodeproj from project.yml (cached)
 	@xcodegen generate --quiet --use-cache
+
+IOS_ARCHIVE := .build/release/YapPhone.xcarchive
+
+ios: check-root generate ## Build the iPhone app and keyboard for the simulator
+	@xcodebuild -project $(PROJECT) -scheme YapPhone -configuration $(CONFIG) \
+		-destination 'generic/platform=iOS Simulator' \
+		-derivedDataPath $(DERIVED) -quiet build
+
+# Signs with the account signed in to Xcode (Settings › Accounts): an App Store
+# Connect API key fails here with "Authentication failed". The build number is
+# bumped past the last upload by the export (manageAppVersionAndBuildNumber).
+testflight: check-root generate ## Archive the iPhone app and upload it to TestFlight
+	@rm -rf $(IOS_ARCHIVE) .build/release/export
+	@xcodebuild -project $(PROJECT) -scheme YapPhone -configuration Release \
+		-destination 'generic/platform=iOS' -archivePath $(IOS_ARCHIVE) \
+		-allowProvisioningUpdates -quiet archive
+	@xcodebuild -exportArchive -archivePath $(IOS_ARCHIVE) \
+		-exportOptionsPlist iOS/ExportOptions.plist -exportPath .build/release/export \
+		-allowProvisioningUpdates
 
 test: check-root ## Run the Core unit tests
 	@cd Packages/Core && swift test
