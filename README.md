@@ -12,6 +12,8 @@ Split out of Hob, a voice assistant that was doing too much.
 
 ## Setup
 
+To just use it, download `Yap-<version>.zip` from [Releases](https://github.com/iamnbutler/yap/releases), unzip it and move `Yap.app` to `/Applications`. It's signed and notarized, and needs macOS 26. Building from source:
+
 ```sh
 brew install xcodegen   # once
 make run                # build, install to /Applications/Yap.app, launch
