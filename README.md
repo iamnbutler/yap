@@ -53,7 +53,7 @@ With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview c
 
 **Transcribe With** in the menu picks the engine (`"engine"` in `config.json`: `onDevice` or `openAI`):
 
-- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go. **Clean Up with Apple Intelligence** then fixes punctuation, filler words and false starts, with the same guards as the iPhone (see [On device, or OpenAI](#on-device-or-openai)). It needs Apple Intelligence on, and adds a second or so.
+- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go. **Clean Up With › Apple Intelligence** then fixes punctuation, filler words and false starts, with the same guards as the iPhone (see [On device, or OpenAI](#on-device-or-openai)). It needs Apple Intelligence on, and adds a second or so.
 - **OpenAI**: better with jargon, billed to your key.
 
 Either falls back to the other when it fails, and the status line says so.

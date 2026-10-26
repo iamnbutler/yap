@@ -77,13 +77,21 @@ struct YapMenu: View {
             Text("This Mac\(Self.note(for: yap.speechModel))").tag(Config.Engine.onDevice)
             Text("OpenAI").tag(Config.Engine.openAI)
         }
-        Toggle(
-            "Clean Up with Apple Intelligence",
-            isOn: Binding(get: { yap.refines }, set: { yap.refines = $0 }))
-            .disabled(yap.engine != .onDevice || yap.refinerUnavailable != nil)
-        if yap.engine == .onDevice, yap.config.refine, let reason = yap.refinerUnavailable {
-            Text(reason)
+        // Only on-device transcripts are cleaned up: OpenAI's come back
+        // punctuated, so the submenu is off with it.
+        Picker(
+            "Clean Up With",
+            selection: Binding(get: { yap.refines }, set: { yap.refines = $0 })
+        ) {
+            Text("Apple Intelligence").tag(true)
+                .disabled(yap.refinerUnavailable != nil)
+            Text("Nothing").tag(false)
+            if let reason = yap.refinerUnavailable {
+                Divider()
+                Text(reason)
+            }
         }
+        .disabled(yap.engine != .onDevice)
 
         Divider()
         Button("Edit Dictionary…") { openDictionary() }
