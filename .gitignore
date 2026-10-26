@@ -5,3 +5,4 @@ Yap.xcodeproj/
 .env
 xcuserdata/
 .lane/trees/
+dist/
