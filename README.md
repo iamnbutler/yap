@@ -1,6 +1,6 @@
 # yap
 
-Dictation for the Mac, built for talking to Claude Code. Hold **Right Command**, talk, let go: OpenAI transcribes it and Yap types the text into whichever app was in front.
+Dictation for the Mac (and now the iPhone), built for talking to Claude Code. Hold **Right Command**, talk, let go: OpenAI transcribes it and Yap types the text into whichever app was in front.
 
 - **Hold** Right Command to talk; release to send.
 - **Tap** it (under 0.3 s) to record hands free, then tap again to send. A *Tink* starts it and a *Pop* ends it. It sends on its own after 10 minutes.
@@ -86,12 +86,49 @@ The model defaults to `gpt-transcribe`. To change it:
 defaults write dev.yap.Yap model gpt-4o-transcribe
 ```
 
+## iPhone
+
+`iOS/` is an iPhone app with a Yap keyboard. Tap the microphone key, talk, tap ✓, and the transcript goes in wherever you were typing. The app holds the dictionary and the settings.
+
+iOS gives keyboards no microphone, so the keyboard doesn't record. The app does, and the two talk over Darwin notifications and files in a shared app group (`Core/Bridge.swift`):
+
+1. The first tap opens the app (`yap://dictate`). It starts an audio session and starts recording. iOS only lets an app start recording from the foreground.
+2. Go back with **◀** in the top-left corner. iOS has no way to send you back on its own.
+3. The session stays up in the background (15 minutes by default; set it under Session Length). Until it ends, the mic key starts and stops recording without leaving the keyboard. While a session is up, iOS shows the microphone indicator.
+4. On ✓ the app transcribes the clip, applies the dictionary, and leaves the result for the keyboard. The keyboard claims it at most once and types it. A result left unclaimed for two minutes is dropped. It is still in Recent in the app.
+
+Setup on the phone: install Yap, then turn it on under **Settings › Apps › Yap › Keyboards**, with **Allow Full Access**. Without Full Access the keyboard can't reach the app group.
+
+### On device, or OpenAI
+
+By default the iPhone transcribes on the phone with Apple's speech model, which needs no key and keeps the audio on the phone. The app downloads the model the first time it opens. Then Apple Intelligence cleans up the text: punctuation, filler words, false starts, and "no wait, I mean…" corrections. Clean-up can only improve a transcript or leave it alone:
+
+- A rewrite that adds words that weren't said is thrown away. A small model asked to tidy "what's the capital of France?" is tempted to answer it (`Refiner.accepts`).
+- So is one that drops more than half of what was said.
+- Any failure gives back the text as heard.
+
+With the dictionary's terms, Yap uses the system dictation model (`DictationTranscriber`), because it is the one that listens for expected words. On synthetic speech it got autoblog, Tailscale, next-cloud, Parade and Coolify right with the terms and wrong without, while `SpeechTranscriber` ignored them. Its own punctuation is sparse, and the clean-up fills that in.
+
+An OpenAI key is optional. With one you can choose OpenAI under **Transcribe With**: it is better with jargon, and it is billed to your account. Either engine falls back to the other when it fails, and the app says when that happened. The key stays in the app's Keychain, where the keyboard can't read it.
+
+Limits:
+
+- The keyboard is only a mic, space, delete and return. Use the globe to switch to a full keyboard. App Review (4.4.1) expects a keyboard to type, so this works in TestFlight but may need letter keys before the App Store.
+- The keyboard opens the app through the responder chain, which iOS doesn't officially offer to keyboards. If a future iOS breaks this, the keyboard says to open Yap by hand.
+- Recording uses the phone's own mic, not a Bluetooth headset's. Switching to a headset mic drops the audio to call quality and pauses music.
+
+```sh
+make ios          # build for the simulator
+make testflight   # archive and upload; needs your account in Xcode › Settings › Accounts
+```
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `App` | The menu bar app: the hotkey, mic capture, typing into other apps. |
-| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, key lookup. |
+| `iOS/App`, `iOS/Keyboard` | The iPhone app and its keyboard extension. They share `AudioCapture` and `PCMRecorder` with the Mac app. |
+| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, key lookup, and the app–keyboard bridge. |
 | `project.yml` | XcodeGen spec. Run `make generate` before opening the project in Xcode. |
 
 `make test` runs the Core tests.
