@@ -15,7 +15,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 sessionSection
-                if keyboardSeen == nil || microphone != .granted || maskedKey == nil {
+                if keyboardSeen == nil || microphone != .granted || !canTranscribe {
                     setupSection
                 }
                 Section("Try It") {
@@ -106,6 +106,11 @@ struct ContentView: View {
 
     // MARK: Setup
 
+    /// Whether the chosen engine, or its fallback, can run.
+    private var canTranscribe: Bool {
+        session.speechModel == .installed || maskedKey != nil
+    }
+
     private var setupSection: some View {
         Section("Set Up") {
             SetupRow(
@@ -132,11 +137,25 @@ struct ContentView: View {
                 }
             }
             SetupRow(
-                done: maskedKey != nil, title: "Add an OpenAI key",
-                detail: "Yap sends each clip to OpenAI to transcribe it."
+                done: canTranscribe, title: "Get the speech model",
+                detail: speechModelDetail
             ) {
-                NavigationLink("Add Key") { KeyView(maskedKey: $maskedKey) }
+                if session.speechModel == .downloadable {
+                    Button("Download") { session.prepareSpeechModel() }
+                } else if session.speechModel == .unsupported {
+                    NavigationLink("Add Key") { KeyView(maskedKey: $maskedKey) }
+                }
             }
+        }
+    }
+
+    private var speechModelDetail: String {
+        switch session.speechModel {
+        case .installed: "Apple's speech model is on this iPhone."
+        case .downloading: "Downloading Apple's speech model…"
+        case .downloadable: "Yap transcribes on this iPhone with Apple's speech model. It's a one-time download."
+        case .unsupported: "This iPhone's language isn't supported on device. Add an OpenAI key to transcribe with OpenAI."
+        case nil: "Checking…"
         }
     }
 
@@ -149,10 +168,25 @@ struct ContentView: View {
             } label: {
                 LabeledContent("Dictionary", value: dictionarySummary)
             }
+            Picker(
+                "Transcribe With",
+                selection: Binding(get: { session.config.engine }, set: { engine in session.update { $0.engine = engine } })
+            ) {
+                Text("This iPhone").tag(Config.Engine.onDevice)
+                Text("OpenAI").tag(Config.Engine.openAI)
+            }
+            Toggle(
+                "Clean Up with Apple Intelligence",
+                isOn: Binding(get: { session.config.refine }, set: { on in session.update { $0.refine = on } })
+            )
+            .disabled(session.config.engine != .onDevice || Refiner.unavailableReason != nil)
+            if session.config.engine == .onDevice, let reason = Refiner.unavailableReason {
+                Text("Clean-up is off: \(reason)").font(.footnote).foregroundStyle(.secondary)
+            }
             NavigationLink {
                 KeyView(maskedKey: $maskedKey)
             } label: {
-                LabeledContent("OpenAI Key", value: maskedKey ?? "Not set")
+                LabeledContent("OpenAI Key", value: maskedKey ?? "Optional")
             }
             Picker("Session Length", selection: Binding(get: { session.minutes }, set: { session.minutes = $0 })) {
                 Text("5 minutes").tag(5)
@@ -237,7 +271,7 @@ struct KeyView: View {
                     .autocorrectionDisabled()
             } footer: {
                 Text(
-                    "Kept in this iPhone's Keychain, where only the Yap app can read it. The keyboard never sees it."
+                    "Optional. With a key, you can transcribe with OpenAI, which is better with names and jargon and billed to your account, and Yap uses it when on-device transcription fails. Kept in this iPhone's Keychain, where only the Yap app can read it. The keyboard never sees it."
                 )
             }
             if let error {

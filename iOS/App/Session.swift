@@ -23,6 +23,8 @@ final class Session {
     private(set) var expires: Date?
     /// The newest transcripts, newest first.
     private(set) var recent: [Transcript] = []
+    /// Whether Apple's speech model is on the phone, or nil until checked.
+    private(set) var speechModel: OnDeviceTranscription.Availability?
 
     /// How long a session stays open after its last dictation.
     var minutes: Int {
@@ -42,6 +44,8 @@ final class Session {
 
     /// The same as the Mac: 16 kHz mono PCM16 is what the models resample to.
     private static let sampleRate = 16000.0
+    private static let format = AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true)!
     private static let minimumSeconds = 0.3
     private static let silencePeak: Int16 = 500
     /// A recording sends itself after this. Ten minutes is about 19 MB, under
@@ -54,6 +58,8 @@ final class Session {
     @ObservationIgnored private let log = TranscriptLog()
     @ObservationIgnored private var observers: [Bridge.Observer] = []
     @ObservationIgnored private var live: Task<Void, Never>?
+    @ObservationIgnored private var clip: OnDeviceClip?
+    @ObservationIgnored private var installing = false
     @ObservationIgnored private var expiry: Task<Void, Never>?
     /// Bumped by every recording, so a timer never ends a newer one.
     @ObservationIgnored private var recording = 0
@@ -98,6 +104,26 @@ final class Session {
 
         // Launching means no session survived: the last process is gone.
         publish()
+        prepareSpeechModel()
+    }
+
+    /// Downloads Apple's speech model if it isn't on the phone. From the
+    /// foreground: a download can't start from a keyboard's background turn.
+    func prepareSpeechModel() {
+        guard !installing else { return }
+        installing = true
+        Task {
+            defer { installing = false }
+            speechModel = await OnDeviceTranscription.availability()
+            guard speechModel == .downloadable || speechModel == .downloading else { return }
+            speechModel = .downloading
+            do {
+                try await OnDeviceTranscription.install()
+            } catch {
+                message = "Couldn't download the speech model: \(error.localizedDescription)"
+            }
+            speechModel = await OnDeviceTranscription.availability()
+        }
     }
 
     // MARK: The session
@@ -113,12 +139,6 @@ final class Session {
             message = "Yap needs the microphone. Turn it on in Settings."
             return publish()
         }
-        guard
-            let format = AVAudioFormat(
-                commonFormat: .pcmFormatInt16, sampleRate: Self.sampleRate, channels: 1,
-                interleaved: true)
-        else { return }
-
         do {
             let audio = AVAudioSession.sharedInstance()
             // Mixing, so music keeps playing through a session. Not Bluetooth
@@ -127,7 +147,7 @@ final class Session {
             try audio.setCategory(
                 .playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
             try audio.setActive(true)
-            try capture.start(format: format) { [recorder, gate] buffer in
+            try capture.start(format: Self.format) { [recorder, gate] buffer in
                 guard gate.isOpen else { return }
                 recorder.append(buffer)
             }
@@ -140,6 +160,7 @@ final class Session {
         message = nil
         extend()
         publish()
+        prepareSpeechModel()
         if thenRecord { begin() }
     }
 
@@ -149,6 +170,8 @@ final class Session {
         turn += 1
         gate.isOpen = false
         live?.cancel()
+        clip?.cancel()
+        clip = nil
         expiry?.cancel()
         capture.stop()
         recorder.reset()
@@ -185,7 +208,19 @@ final class Session {
         message = nil
         expiry?.cancel()
         publish()
-        if config.overlay { startLive() }
+        if config.engine == .onDevice {
+            let shown = recording
+            let showing = config.overlay
+            clip = OnDeviceClip(
+                recorder: recorder, format: Self.format, terms: DictationDictionary.load().terms
+            ) { [weak self] text in
+                guard showing, let self, self.recording == shown, self.phase == .recording else { return }
+                self.preview = text
+                self.publish()
+            }
+        } else if config.overlay {
+            startLive()
+        }
 
         let recording = recording
         Task {
@@ -200,6 +235,8 @@ final class Session {
         turn += 1
         gate.isOpen = false
         live?.cancel()
+        clip?.cancel()
+        clip = nil
         recorder.reset()
         phase = .ready
         preview = ""
@@ -212,44 +249,92 @@ final class Session {
         gate.isOpen = false
         live?.cancel()
         live = nil
+        let clip = clip
+        self.clip = nil
         let samples = recorder.take()
         let seconds = Double(samples.count) / 2 / Self.sampleRate
 
-        guard seconds >= Self.minimumSeconds else { return finish("Too short to send.") }
-        guard PCMRecorder.peak(of: samples) >= Self.silencePeak else {
-            return finish("Heard nothing.")
+        guard seconds >= Self.minimumSeconds else {
+            clip?.cancel()
+            return finish("Too short to send.")
         }
-        guard let apiKey = APIKey.read() else {
-            return finish("Add an OpenAI key in the Yap app.")
+        guard PCMRecorder.peak(of: samples) >= Self.silencePeak else {
+            clip?.cancel()
+            return finish("Heard nothing.")
         }
 
         phase = .transcribing
         publish()
         let turn = turn
-        let model = UserDefaults.standard.string(forKey: Self.modelKey)
-            ?? OpenAITranscription.defaultModel
+        let config = config
         let dictionary = DictationDictionary.load()
 
-        Task {
-            do {
-                let client = OpenAITranscription(
-                    apiKey: apiKey, model: model, prompt: dictionary.prompt)
-                let heard = try await client.transcribe(
-                    wav: WAV.pcm16(samples, sampleRate: Int(Self.sampleRate)))
-                let text = dictionary.apply(to: heard)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return finish("Heard nothing.") }
+        let onDevice = { () async throws -> String in
+            let heard =
+                if let clip {
+                    try await clip.finish(samples)
+                } else {
+                    try await OnDeviceTranscription.transcribe(
+                        pcm16: samples, sampleRate: Self.sampleRate, terms: dictionary.terms)
+                }
+            let fixed = dictionary.apply(to: heard)
+            guard config.refine, !fixed.isEmpty else { return fixed }
+            // Fixes again after: the refiner may respell a word they fix.
+            return dictionary.apply(to: await Refiner.refine(fixed, terms: dictionary.terms))
+        }
+        let openAI = { () async throws -> String in
+            guard let apiKey = APIKey.read() else { throw SendFailure.noKey }
+            let model = UserDefaults.standard.string(forKey: Self.modelKey)
+                ?? OpenAITranscription.defaultModel
+            let client = OpenAITranscription(apiKey: apiKey, model: model, prompt: dictionary.prompt)
+            let heard = try await client.transcribe(
+                wav: WAV.pcm16(samples, sampleRate: Int(Self.sampleRate)))
+            return dictionary.apply(to: heard)
+        }
+        // The chosen engine, then the other: the clip was loud enough to be
+        // speech, so an empty result is a failure worth a second opinion.
+        let engines: [(Config.Engine, () async throws -> String)] =
+            config.engine == .onDevice
+            ? [(.onDevice, onDevice), (.openAI, openAI)] : [(.openAI, openAI), (.onDevice, onDevice)]
 
-                // Kept first, so text that never reaches a field isn't lost.
-                remember(Transcript(text: text))
-                guard turn == self.turn else { return }
+        Task {
+            var failure: (any Error)?
+            var text = ""
+            var used = config.engine
+            for (engine, transcribe) in engines {
+                do {
+                    text = try await transcribe().trimmingCharacters(in: .whitespacesAndNewlines)
+                    used = engine
+                    if !text.isEmpty { break }
+                } catch {
+                    if failure == nil { failure = error }
+                }
+            }
+            guard turn == self.turn else { return }
+            guard !text.isEmpty else { return finish(failure?.localizedDescription ?? "Heard nothing.") }
+
+            // Kept first, so text that never reaches a field isn't lost.
+            remember(Transcript(text: text))
+            do {
                 try Bridge.deliver(Bridge.Result(text: text))
-                finish(nil)
+                finish(used == config.engine ? nil : Self.fellBack(to: used, after: failure))
             } catch {
-                guard turn == self.turn else { return }
                 finish(error.localizedDescription)
             }
         }
+    }
+
+    private static func fellBack(to engine: Config.Engine, after failure: (any Error)?) -> String {
+        let reason = failure.map { " (\($0.localizedDescription))" } ?? ""
+        return switch engine {
+        case .openAI: "Transcribed by OpenAI: on-device didn't work\(reason)."
+        case .onDevice: "Transcribed on device: OpenAI didn't work\(reason)."
+        }
+    }
+
+    private enum SendFailure: LocalizedError {
+        case noKey
+        var errorDescription: String? { "No OpenAI key." }
     }
 
     /// Ends a clip. A session that ended meanwhile stays ended.
