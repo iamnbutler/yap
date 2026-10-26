@@ -20,8 +20,9 @@ public struct Config: Codable, Equatable, Sendable {
     /// Days of transcript files to keep; older ones are deleted.
     public var retentionDays = 30
     /// Show what is being heard while you talk, in a panel at the bottom of
-    /// the screen. Each pause sends the last phrase for transcription, so this
-    /// roughly doubles the audio sent to OpenAI.
+    /// the screen. With OpenAI, each pause sends the last phrase for
+    /// transcription, so this roughly doubles the audio sent; on device it
+    /// costs nothing.
     public var overlay = true
     /// The key to hold or tap, by name: see `Hotkey`. Kept as written, so a
     /// name Yap does not know survives a save from the menu and can be fixed.

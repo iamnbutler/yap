@@ -1,6 +1,6 @@
 # yap
 
-Dictation for the Mac (and now the iPhone), built for talking to Claude Code. Hold **Right Command**, talk, let go: OpenAI transcribes it and Yap types the text into whichever app was in front.
+Dictation for the Mac (and now the iPhone), built for talking to Claude Code. Hold **Right Command**, talk, let go: Yap transcribes it, on the Mac or with OpenAI, and types the text into whichever app was in front.
 
 - **Hold** Right Command to talk; release to send.
 - **Tap** it (under 0.3 s) to record hands free, then tap again to send. A *Tink* starts it and a *Pop* ends it. It sends on its own after 10 minutes.
@@ -21,7 +21,7 @@ Building it yourself? `project.yml` signs with my Apple team (`DEVELOPMENT_TEAM`
 
 Grant Accessibility (to hear the key and type) and Microphone when asked. The menu bar icon's menu tells you if Accessibility is missing.
 
-Put an OpenAI key in `~/Library/Application Support/yap/secrets.env` (mode 600):
+To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), put a key in `~/Library/Application Support/yap/secrets.env` (mode 600):
 
 ```
 OPENAI_API_KEY=sk-...
@@ -47,7 +47,16 @@ auto blog => autoblog
 
 While you talk, a panel at the bottom of the screen shows a waveform and what Yap has heard so far. At each pause, the last phrase is transcribed and added to it. On send, the whole clip is transcribed again and replaces the preview, and that version is what gets typed. The preview is only for watching, so a chunk that fails costs nothing. The panel never takes focus or clicks, so typing still goes to the app you were in.
 
-The chunks roughly double the audio sent to OpenAI. Set `"overlay": false` in `config.json` to turn it off.
+With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview comes from the same live transcription that gets typed, and costs nothing. Set `"overlay": false` in `config.json` to turn it off.
+
+## On the Mac, or OpenAI
+
+**Transcribe With** in the menu picks the engine (`"engine"` in `config.json`: `onDevice` or `openAI`):
+
+- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go. **Clean Up with Apple Intelligence** then fixes punctuation, filler words and false starts, with the same guards as the iPhone (see [On device, or OpenAI](#on-device-or-openai)). It needs Apple Intelligence on, and adds a second or so.
+- **OpenAI**: better with jargon, billed to your key.
+
+Either falls back to the other when it fails, and the status line says so.
 
 ## Transcripts
 

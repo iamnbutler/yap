@@ -4,7 +4,7 @@ import Speech
 import Synchronization
 
 /// Transcribes on the device, with Apple's speech model: no key, no network,
-/// nothing leaves the phone.
+/// nothing leaves the device.
 ///
 /// Live, like the overlay: feed it audio as it is recorded with `append`, and
 /// `preview` follows along (what is settled, then the guess at what is still

@@ -4,16 +4,16 @@ import Core
 import Observation
 import Synchronization
 
-/// Hold the key (Right Command unless config.json says otherwise), speak, release: OpenAI transcribes the clip and Yap
-/// types the text into whatever app was frontmost when the key went down.
+/// Hold the key (Right Command unless config.json says otherwise), speak, release: the clip is
+/// transcribed and Yap types the text into whatever app was frontmost when the key went down.
 ///
 /// Or tap it: a press shorter than `tapLimit` latches the recording on, hands
 /// free, and the next tap sends it. Holding a key through a long thought is
 /// tiring, and one key with two gestures needs no mode setting.
 ///
-/// OpenAI rather than on-device SpeechAnalyzer: a round trip of under a second
-/// buys accuracy on technical speech, and a misheard word here is typed
-/// straight into someone's prompt.
+/// Transcribed by `config.engine`: on this Mac (SpeechAnalyzer, then Apple
+/// Intelligence to clean it up) or by OpenAI, which is better on technical
+/// speech. Either falls back to the other when it fails.
 @MainActor
 @Observable
 final class Yap {
@@ -40,6 +40,31 @@ final class Yap {
     /// Re-read before every clip, so a hand edit to config.json applies to the
     /// next dictation; the menu writes it back through `keepsTranscripts`.
     private(set) var config: Config
+
+    var engine: Config.Engine {
+        get { config.engine }
+        set {
+            config.engine = newValue
+            do { try config.save() } catch { detail = "Couldn't save settings: \(error.localizedDescription)" }
+            if newValue == .onDevice { prepareSpeechModel() }
+        }
+    }
+
+    var refines: Bool {
+        get { config.refine }
+        set {
+            config.refine = newValue
+            do { try config.save() } catch { detail = "Couldn't save settings: \(error.localizedDescription)" }
+        }
+    }
+
+    /// Whether Apple's speech model for this language is on the Mac; nil
+    /// until checked.
+    private(set) var speechModel: OnDeviceTranscription.Availability?
+    /// Why Apple Intelligence can't clean up transcripts, or nil when it can.
+    /// Re-read when the menu opens: it changes in System Settings.
+    private(set) var refinerUnavailable: String?
+    @ObservationIgnored private var installing = false
 
     var keepsTranscripts: Bool {
         get { config.keepTranscripts }
@@ -93,6 +118,9 @@ final class Yap {
     /// Transcribes chunks for the overlay while recording. Display only: the
     /// typed text always comes from the whole clip.
     @ObservationIgnored private var live: Task<Void, Never>?
+    /// Transcribes on the Mac as you talk, when that is the engine; its
+    /// preview feeds the overlay, and its result is what gets typed.
+    @ObservationIgnored private var clip: OnDeviceClip?
     @ObservationIgnored private var demo: Overlay?
     @ObservationIgnored private var target: NSRunningApplication?
     @ObservationIgnored private var chorded = false
@@ -180,6 +208,34 @@ final class Yap {
         key.onChord = { [weak self] in self?.chorded = true }
         key.start()
         watchConfig()
+        refreshModels()
+        if config.engine == .onDevice { prepareSpeechModel() }
+    }
+
+    /// Downloads Apple's speech model for this language if the Mac doesn't
+    /// have it. Only on-device needs it, so only then.
+    func prepareSpeechModel() {
+        guard !installing else { return }
+        installing = true
+        Task {
+            defer { installing = false }
+            speechModel = await OnDeviceTranscription.availability()
+            guard speechModel == .downloadable || speechModel == .downloading else { return }
+            speechModel = .downloading
+            do {
+                try await OnDeviceTranscription.install()
+            } catch {
+                detail = "Couldn't download the speech model: \(error.localizedDescription)"
+            }
+            speechModel = await OnDeviceTranscription.availability()
+        }
+    }
+
+    /// Re-measured when the menu opens, like Accessibility.
+    func refreshModels() {
+        refinerUnavailable = Refiner.unavailableReason
+        guard !installing else { return }
+        Task { speechModel = await OnDeviceTranscription.availability() }
     }
 
     /// Reads config.json and applies it: the key changes at once, everything
@@ -204,7 +260,8 @@ final class Yap {
     }
 
     /// Polls config.json's modification date, so a hand edit applies without
-    /// a relaunch. A file watch would miss editors that save in place, and a
+    /// a relaunch, and Apple Intelligence, which is turned on in System
+    /// Settings. A file watch would miss editors that save in place, and a
     /// stat every two seconds costs nothing.
     private func watchConfig() {
         let modified = { () -> Date? in
@@ -216,6 +273,7 @@ final class Yap {
             while true {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
+                self.refinerUnavailable = Refiner.unavailableReason
                 let now = modified()
                 guard now != last else { continue }
                 last = now
@@ -252,8 +310,17 @@ final class Yap {
             }
             state = .recording
             detail = "Listening…"
-            if config.overlay {
-                overlay.begin(recording)
+            if config.overlay { overlay.begin(recording) }
+            if config.engine == .onDevice {
+                let shown = recording
+                let showing = config.overlay
+                clip = OnDeviceClip(
+                    recorder: recorder, format: format, terms: DictationDictionary.load().terms
+                ) { [weak self] text in
+                    guard showing, let self, self.recording == shown, self.state == .recording else { return }
+                    self.overlay.update(shown, text: text)
+                }
+            } else if config.overlay {
                 startLive()
             }
         } catch {
@@ -297,6 +364,8 @@ final class Yap {
         capture.stop()
         live?.cancel()
         live = nil
+        let clip = clip
+        self.clip = nil
         state = .idle
         let samples = recorder.take()
         let seconds = Double(samples.count) / 2 / Self.sampleRate
@@ -304,14 +373,17 @@ final class Yap {
         let overlay = overlay
 
         guard seconds >= Self.minimumSeconds else {
+            clip?.cancel()
             overlay.hide(shown)
             return finish("Too short to send")
         }
         guard PCMRecorder.peak(of: samples) >= Self.silencePeak else {
+            clip?.cancel()
             overlay.hide(shown)
             return finish("Heard nothing")
         }
         guard let pid = target?.processIdentifier else {
+            clip?.cancel()
             overlay.hide(shown)
             return finish("No app to type into")
         }
@@ -326,20 +398,54 @@ final class Yap {
         let dictionary = DictationDictionary.load()
         let submits = submits
         let app = target?.localizedName
+        let config = config
+
+        let onDevice = { () async throws -> String in
+            let heard =
+                if let clip {
+                    try await clip.finish(samples)
+                } else {
+                    try await OnDeviceTranscription.transcribe(
+                        pcm16: samples, sampleRate: Self.sampleRate, terms: dictionary.terms)
+                }
+            let fixed = dictionary.apply(to: heard)
+            guard config.refine, !fixed.isEmpty else { return fixed }
+            // Fixes again after: the refiner may respell a word they fix.
+            return dictionary.apply(to: await Refiner.refine(fixed, terms: dictionary.terms))
+        }
+        let openAI = { () async throws -> String in
+            // Read per clip, so a key changed in secrets.env needs no relaunch.
+            let client = OpenAITranscription(
+                apiKey: try Secrets.openAIAPIKey(), model: model, prompt: dictionary.prompt)
+            let heard = try await client.transcribe(
+                wav: WAV.pcm16(samples, sampleRate: Int(Self.sampleRate)))
+            return dictionary.apply(to: heard)
+        }
+        // The chosen engine, then the other: the clip was loud enough to be
+        // speech, so an empty result is a failure worth a second opinion.
+        let engines: [(Config.Engine, () async throws -> String)] =
+            config.engine == .onDevice
+            ? [(.onDevice, onDevice), (.openAI, openAI)] : [(.openAI, openAI), (.onDevice, onDevice)]
 
         Task {
             do {
-                // Read per clip, so a key changed in secrets.env needs no relaunch.
-                let client = OpenAITranscription(
-                    apiKey: try Secrets.openAIAPIKey(), model: model, prompt: dictionary.prompt)
                 let started = ContinuousClock.now
-                let heard = try await client.transcribe(
-                    wav: WAV.pcm16(samples, sampleRate: Int(Self.sampleRate)))
-                let text = dictionary.apply(to: heard)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var failure: (any Error)?
+                var text = ""
+                var used = config.engine
+                for (engine, transcribe) in engines {
+                    do {
+                        text = try await transcribe().trimmingCharacters(in: .whitespacesAndNewlines)
+                        used = engine
+                        if !text.isEmpty { break }
+                    } catch {
+                        if failure == nil { failure = error }
+                    }
+                }
                 let elapsed = started.duration(to: .now)
                 guard !text.isEmpty else {
                     overlay.hide(shown)
+                    if let failure { throw failure }
                     return finish("Heard nothing")
                 }
 
@@ -355,7 +461,11 @@ final class Yap {
                     transcript.typed = true
                     overlay.update(shown, phase: .typed)
                     overlay.hide(shown, after: .seconds(1.5))
-                    finish("Typed \(text.count) characters (\(Self.format(elapsed)) round trip)")
+                    let how =
+                        used == config.engine
+                        ? used == .onDevice ? "on this Mac" : "round trip"
+                        : Self.fellBack(to: used, after: failure)
+                    finish("Typed \(text.count) characters (\(Self.format(elapsed)) \(how))")
                 } catch {
                     NSSound(named: "Basso")?.play()
                     overlay.update(shown, phase: .failed)
@@ -422,6 +532,8 @@ final class Yap {
     private func stopLive() {
         live?.cancel()
         live = nil
+        clip?.cancel()
+        clip = nil
         overlay.hide(recording)
     }
 
@@ -449,6 +561,14 @@ final class Yap {
     private func finish(_ detail: String) {
         self.detail = detail
         if state != .recording { state = .idle }
+    }
+
+    private static func fellBack(to engine: Config.Engine, after failure: (any Error)?) -> String {
+        let reason = failure.map { ": \($0.localizedDescription)" } ?? ""
+        return switch engine {
+        case .openAI: "by OpenAI, on-device failed\(reason)"
+        case .onDevice: "on this Mac, OpenAI failed\(reason)"
+        }
     }
 
     private static func format(_ duration: Duration) -> String {

@@ -66,6 +66,7 @@ targets:
       - path: iOS/App
       - path: App/AudioCapture.swift
       - path: App/PCMRecorder.swift
+      - path: App/OnDeviceClip.swift
     dependencies:
       - package: Core
         product: Core

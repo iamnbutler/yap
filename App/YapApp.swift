@@ -70,12 +70,38 @@ struct YapMenu: View {
             isOn: Binding(get: { yap.keepsTranscripts }, set: { yap.keepsTranscripts = $0 }))
 
         Divider()
+        Picker(
+            "Transcribe With",
+            selection: Binding(get: { yap.engine }, set: { yap.engine = $0 })
+        ) {
+            Text("This Mac\(Self.note(for: yap.speechModel))").tag(Config.Engine.onDevice)
+            Text("OpenAI").tag(Config.Engine.openAI)
+        }
+        Toggle(
+            "Clean Up with Apple Intelligence",
+            isOn: Binding(get: { yap.refines }, set: { yap.refines = $0 }))
+            .disabled(yap.engine != .onDevice || yap.refinerUnavailable != nil)
+        if yap.engine == .onDevice, yap.config.refine, let reason = yap.refinerUnavailable {
+            Text(reason)
+        }
+
+        Divider()
         Button("Edit Dictionary…") { openDictionary() }
         Button("Edit Settings…") { yap.openConfig() }
 
         Divider()
         Button("Quit Yap") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    /// What stands between the speech model and dictating, if anything.
+    static func note(for model: OnDeviceTranscription.Availability?) -> String {
+        switch model {
+        case .downloadable: " (Not Downloaded)"
+        case .downloading: " (Downloading…)"
+        case .unsupported: " (Not for This Language)"
+        case .installed, nil: ""
+        }
     }
 
     /// One line: the time, a warning when it never reached its app, and as much
