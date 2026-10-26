@@ -2,8 +2,8 @@ import AppKit
 import MetalKit
 import SwiftUI
 
-/// What is being heard, while you talk: a panel at the bottom of the screen
-/// with a waveform and the transcript so far.
+/// What is being heard, while you talk: a panel in the top-right corner, where
+/// notifications show, with a waveform and the transcript so far.
 ///
 /// The live text comes from chunks transcribed at each pause. On send, the
 /// whole clip is transcribed again and replaces it, so the preview can be
@@ -83,16 +83,25 @@ final class Overlay {
         panel.orderFrontRegardless()
     }
 
-    /// Bottom centre of the screen the pointer is on, above the Dock. Again on
-    /// every resize: the hosting controller keeps the top edge when the
-    /// content grows, which would walk the panel down off the screen.
+    /// Top right of the screen the pointer is on, under the menu bar, where
+    /// notification banners sit. Again on every resize, so a longer
+    /// transcript grows the panel downwards from a fixed top edge.
     private func place(_ panel: NSPanel) {
         guard let screen else { return }
         let size = panel.frame.size
         let area = screen.visibleFrame
-        let origin = NSPoint(x: area.midX - size.width / 2, y: area.minY + 56)
+        // The card sits `OverlayView.margin` inside the panel, which leaves
+        // room for its shadow; measure the corner gap from the card.
+        let shift = OverlayView.margin - Self.corner
+        let origin = NSPoint(x: area.maxX - size.width + shift, y: area.maxY - size.height + shift)
         if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
     }
+
+    /// The gap between the card and the screen's corner, as banners have.
+    /// More than `OverlayView.margin`, so the panel stays inside the screen:
+    /// a panel touching the right edge drew its Metal view black, on a Studio
+    /// Display with the built-in display reaching past its right edge.
+    private static let corner: CGFloat = 20
 
     private func makePanel() -> NSPanel {
         let panel = NSPanel(
@@ -107,8 +116,7 @@ final class Overlay {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
-        // Sized by its content. The origin is the bottom-left corner, so a
-        // longer transcript grows the panel upwards and it stays put.
+        // Sized by its content; `place` keeps the top-right corner fixed.
         let host = NSHostingController(rootView: OverlayView(model: model, renderer: renderer))
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
@@ -204,7 +212,9 @@ enum Palette {
 }
 
 struct OverlayView: View {
-    static let width: CGFloat = 520
+    static let width: CGFloat = 440
+    /// Room around the card for its shadow.
+    static let margin: CGFloat = 18
     /// Enough for about four lines; earlier text scrolls off the top.
     private static let shown = 280
 
@@ -252,7 +262,7 @@ struct OverlayView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Palette.edge, lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
-        .padding(18)
+        .padding(Self.margin)
         .animation(.easeOut(duration: 0.15), value: model.text)
     }
 
