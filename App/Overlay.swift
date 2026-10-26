@@ -20,9 +20,6 @@ final class Overlay {
     /// next recording has begun, and must not overwrite it or hide it.
     private var owner = 0
     private var hiding: Task<Void, Never>?
-    /// The screen the panel was shown on; it stays there as it grows.
-    private var screen: NSScreen?
-    private var resizing: NSObjectProtocol?
 
     init(level: @escaping @MainActor () -> Float) {
         renderer = WaveRenderer(level: level)
@@ -77,25 +74,33 @@ final class Overlay {
         let panel = panel ?? makePanel()
         self.panel = panel
         renderer.paused = false
-        screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        place(panel)
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        if let screen { place(panel, on: screen) }
         panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
     /// Top right of the screen the pointer is on, under the menu bar, where
-    /// notification banners sit. Again on every resize, so a longer
-    /// transcript grows the panel downwards from a fixed top edge.
-    private func place(_ panel: NSPanel) {
-        guard let screen else { return }
-        let size = panel.frame.size
+    /// notification banners sit. Only when shown: the panel never changes
+    /// size, so nothing moves it while it is up.
+    private func place(_ panel: NSPanel, on screen: NSScreen) {
         let area = screen.visibleFrame
         // The card sits `OverlayView.margin` inside the panel, which leaves
         // room for its shadow; measure the corner gap from the card.
         let shift = OverlayView.margin - Self.corner
-        let origin = NSPoint(x: area.maxX - size.width + shift, y: area.maxY - size.height + shift)
-        if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
+        let frame = NSRect(
+            x: area.maxX - Self.size.width + shift, y: area.maxY - Self.size.height + shift,
+            width: Self.size.width, height: Self.size.height)
+        if panel.frame != frame { panel.setFrame(frame, display: false) }
     }
+
+    /// Fixed, and tall enough for the card at its longest: a header, the
+    /// waveform and about five lines of text. A panel sized to its content
+    /// resized on every new line, and AppKit moved it before `place` could
+    /// put it back, so the top edge bobbed. The card is drawn at the top and
+    /// grows down inside it; the rest is transparent, and the panel ignores
+    /// the mouse, so it covers nothing.
+    private static let size = NSSize(width: OverlayView.width + OverlayView.margin * 2, height: 400)
 
     /// The gap between the card and the screen's corner, as banners have.
     /// More than `OverlayView.margin`, so the panel stays inside the screen:
@@ -105,7 +110,7 @@ final class Overlay {
 
     private func makePanel() -> NSPanel {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: OverlayView.width, height: 80),
+            contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -116,18 +121,14 @@ final class Overlay {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
-        // Sized by its content; `place` keeps the top-right corner fixed.
-        let host = NSHostingController(rootView: OverlayView(model: model, renderer: renderer))
-        host.sizingOptions = [.preferredContentSize]
+        // The content never sizes the window: the card is pinned to the top
+        // of a fixed panel and grows downwards.
+        let host = NSHostingController(
+            rootView: OverlayView(model: model, renderer: renderer)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
+        host.sizingOptions = []
         panel.contentViewController = host
-        resizing = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResizeNotification, object: panel, queue: .main
-        ) { [weak self, weak panel] _ in
-            MainActor.assumeIsolated {
-                guard let self, let panel else { return }
-                self.place(panel)
-            }
-        }
+        panel.setContentSize(Self.size)
         return panel
     }
 }
