@@ -11,9 +11,10 @@ import Synchronization
 /// free, and the next tap sends it. Holding a key through a long thought is
 /// tiring, and one key with two gestures needs no mode setting.
 ///
-/// Transcribed by `config.engine`: on this Mac (SpeechAnalyzer, then Apple
-/// Intelligence to clean it up) or by OpenAI, which is better on technical
-/// speech. Either falls back to the other when it fails.
+/// Transcribed by `config.engine`: on this Mac (SpeechAnalyzer) or by OpenAI,
+/// which is better on technical speech, and either falls back to the other
+/// when it fails. Then cleaned up by `config.cleanup`: Apple Intelligence, an
+/// OpenAI model, or nothing.
 @MainActor
 @Observable
 final class Yap {
@@ -50,10 +51,10 @@ final class Yap {
         }
     }
 
-    var refines: Bool {
-        get { config.refine }
+    var cleanup: Config.Cleanup {
+        get { config.cleanup }
         set {
-            config.refine = newValue
+            config.cleanup = newValue
             do { try config.save() } catch { detail = "Couldn't save settings: \(error.localizedDescription)" }
         }
     }
@@ -64,6 +65,8 @@ final class Yap {
     /// Why Apple Intelligence can't clean up transcripts, or nil when it can.
     /// Re-read when the menu opens: it changes in System Settings.
     private(set) var refinerUnavailable: String?
+    /// Whether there is an OpenAI key, which its engine and clean-up need.
+    private(set) var hasOpenAIKey = false
     @ObservationIgnored private var installing = false
 
     var keepsTranscripts: Bool {
@@ -234,6 +237,7 @@ final class Yap {
     /// Re-measured when the menu opens, like Accessibility.
     func refreshModels() {
         refinerUnavailable = Refiner.unavailableReason
+        hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
         guard !installing else { return }
         Task { speechModel = await OnDeviceTranscription.availability() }
     }
@@ -274,6 +278,7 @@ final class Yap {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 self.refinerUnavailable = Refiner.unavailableReason
+                self.hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
                 let now = modified()
                 guard now != last else { continue }
                 last = now
@@ -408,10 +413,7 @@ final class Yap {
                     try await OnDeviceTranscription.transcribe(
                         pcm16: samples, sampleRate: Self.sampleRate, terms: dictionary.terms)
                 }
-            let fixed = dictionary.apply(to: heard)
-            guard config.refine, !fixed.isEmpty else { return fixed }
-            // Fixes again after: the refiner may respell a word they fix.
-            return dictionary.apply(to: await Refiner.refine(fixed, terms: dictionary.terms))
+            return dictionary.apply(to: heard)
         }
         let openAI = { () async throws -> String in
             // Read per clip, so a key changed in secrets.env needs no relaunch.
@@ -442,12 +444,20 @@ final class Yap {
                         if failure == nil { failure = error }
                     }
                 }
-                let elapsed = started.duration(to: .now)
                 guard !text.isEmpty else {
                     overlay.hide(shown)
                     if let failure { throw failure }
                     return finish("Heard nothing")
                 }
+                if config.cleanup != .off {
+                    detail = "Cleaning up…"
+                    let refined = await Refiner.refine(
+                        text, terms: dictionary.terms, with: config.cleanup,
+                        apiKey: try? Secrets.openAIAPIKey())
+                    // Fixes again after: the refiner may respell a word they fix.
+                    text = dictionary.apply(to: refined).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                let elapsed = started.duration(to: .now)
 
                 var transcript = Transcript(text: text, app: app)
                 // Cancelled while in flight: not typed, but still kept.

@@ -60,11 +60,38 @@ final class RefinerTests: XCTestCase {
 
     func testConfigReadsTheEngineAndFallsBackFromAnUnknownOne() throws {
         let decoder = JSONDecoder()
-        let openAI = try decoder.decode(Config.self, from: Data(#"{"engine":"openAI","refine":false}"#.utf8))
+        let openAI = try decoder.decode(Config.self, from: Data(#"{"engine":"openAI","cleanup":"openAIFast"}"#.utf8))
         XCTAssertEqual(openAI.engine, .openAI)
-        XCTAssertFalse(openAI.refine)
-        let unknown = try decoder.decode(Config.self, from: Data(#"{"engine":"whisper"}"#.utf8))
+        XCTAssertEqual(openAI.cleanup, .openAIFast)
+        let unknown = try decoder.decode(Config.self, from: Data(#"{"engine":"whisper","cleanup":"gemini"}"#.utf8))
         XCTAssertEqual(unknown.engine, .onDevice)
-        XCTAssertTrue(unknown.refine)
+        XCTAssertEqual(unknown.cleanup, .appleIntelligence)
+    }
+
+    func testConfigTurnsTheOldRefineOffIntoNoCleanup() throws {
+        let decoder = JSONDecoder()
+        XCTAssertEqual(try decoder.decode(Config.self, from: Data(#"{"refine":false}"#.utf8)).cleanup, .off)
+        XCTAssertEqual(try decoder.decode(Config.self, from: Data(#"{"refine":true}"#.utf8)).cleanup, .appleIntelligence)
+    }
+
+    func testOpenAICleanupRequestsStructuredText() throws {
+        let fast = try XCTUnwrap(OpenAICleanup(.openAIFast, apiKey: "k"))
+        let body = try JSONSerialization.jsonObject(
+            with: fast.body(chunk: "um hi", instructions: "Clean up.")) as? [String: Any]
+        XCTAssertEqual(body?["model"] as? String, "gpt-6-luna")
+        XCTAssertEqual((body?["reasoning"] as? [String: Any])?["effort"] as? String, "none")
+        XCTAssertEqual(body?["input"] as? String, "<dictation>\num hi\n</dictation>")
+        let format = (body?["text"] as? [String: Any])?["format"] as? [String: Any]
+        XCTAssertEqual(format?["type"] as? String, "json_schema")
+        XCTAssertNil(OpenAICleanup(.appleIntelligence, apiKey: "k"))
+    }
+
+    func testOpenAICleanupReadsTheTextAndTheError() throws {
+        let ok = Data(#"{"output":[{"type":"reasoning"},{"type":"message","content":[{"type":"output_text","text":"{\"text\":\"Hi.\"}"}]}]}"#.utf8)
+        XCTAssertEqual(try OpenAICleanup.decode(ok, status: 200), "Hi.")
+        let error = Data(#"{"error":{"message":"bad key"}}"#.utf8)
+        XCTAssertThrowsError(try OpenAICleanup.decode(error, status: 401)) {
+            XCTAssertEqual($0.localizedDescription, "OpenAI 401: bad key")
+        }
     }
 }

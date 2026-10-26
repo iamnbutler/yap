@@ -53,10 +53,21 @@ With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview c
 
 **Transcribe With** in the menu picks the engine (`"engine"` in `config.json`: `onDevice` or `openAI`):
 
-- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go. **Clean Up With › Apple Intelligence** then fixes punctuation, filler words and false starts, with the same guards as the iPhone (see [On device, or OpenAI](#on-device-or-openai)). It needs Apple Intelligence on, and adds a second or so.
+- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go.
 - **OpenAI**: better with jargon, billed to your key.
 
 Either falls back to the other when it fails, and the status line says so.
+
+**Clean Up With** then fixes punctuation, filler words, false starts and "no wait, I mean…" corrections, whichever engine transcribed (`"cleanup"` in `config.json`):
+
+| | `cleanup` | Time for a sentence |
+|---|---|---|
+| **Apple Intelligence** | `appleIntelligence` (default) | ~1.3 s, on the device; needs Apple Intelligence on |
+| **OpenAI, Fast** (GPT-6 Luna) | `openAIFast` | ~1.2–1.9 s; the best of the three in testing |
+| **OpenAI, Smart** (GPT-6.1 Sol) | `openAISmart` | ~2.5–5 s |
+| **Nothing** | `off` | |
+
+All three have the same guards (see [On device, or OpenAI](#on-device-or-openai)): a rewrite that adds what wasn't said, or drops most of what was, is thrown away, and any failure types the text as heard. The OpenAI models also get the dictionary's terms as spellings.
 
 ## Transcripts
 
@@ -110,7 +121,7 @@ Setup on the phone: install Yap, then turn it on under **Settings › Apps › Y
 
 ### On device, or OpenAI
 
-By default the iPhone transcribes on the phone with Apple's speech model, which needs no key and keeps the audio on the phone. The app downloads the model the first time it opens. Then Apple Intelligence cleans up the text: punctuation, filler words, false starts, and "no wait, I mean…" corrections. Clean-up can only improve a transcript or leave it alone:
+By default the iPhone transcribes on the phone with Apple's speech model, which needs no key and keeps the audio on the phone. The app downloads the model the first time it opens. Then Apple Intelligence cleans up the text (or an OpenAI model, under **Clean Up With**): punctuation, filler words, false starts, and "no wait, I mean…" corrections. Clean-up can only improve a transcript or leave it alone:
 
 - A rewrite that adds words that weren't said is thrown away. A small model asked to tidy "what's the capital of France?" is tempted to answer it (`Refiner.accepts`).
 - So is one that drops more than half of what was said.

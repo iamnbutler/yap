@@ -277,10 +277,7 @@ final class Session {
                     try await OnDeviceTranscription.transcribe(
                         pcm16: samples, sampleRate: Self.sampleRate, terms: dictionary.terms)
                 }
-            let fixed = dictionary.apply(to: heard)
-            guard config.refine, !fixed.isEmpty else { return fixed }
-            // Fixes again after: the refiner may respell a word they fix.
-            return dictionary.apply(to: await Refiner.refine(fixed, terms: dictionary.terms))
+            return dictionary.apply(to: heard)
         }
         let openAI = { () async throws -> String in
             guard let apiKey = APIKey.read() else { throw SendFailure.noKey }
@@ -312,6 +309,13 @@ final class Session {
             }
             guard turn == self.turn else { return }
             guard !text.isEmpty else { return finish(failure?.localizedDescription ?? "Heard nothing.") }
+            if config.cleanup != .off {
+                let refined = await Refiner.refine(
+                    text, terms: dictionary.terms, with: config.cleanup, apiKey: APIKey.read())
+                // Fixes again after: the refiner may respell a word they fix.
+                text = dictionary.apply(to: refined).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard turn == self.turn else { return }
+            }
 
             // Kept first, so text that never reaches a field isn't lost.
             remember(Transcript(text: text))

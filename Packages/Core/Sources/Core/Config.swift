@@ -8,7 +8,7 @@ import Foundation
 ///       "overlay": true,
 ///       "retentionDays": 30,
 ///       "engine": "onDevice",
-///       "refine": true
+///       "cleanup": "appleIntelligence"
 ///     }
 ///
 /// A missing file or a missing key falls back to its default, so the file
@@ -31,12 +31,17 @@ public struct Config: Codable, Equatable, Sendable {
     /// `openAI` (better with jargon, with your key). Either falls back to the
     /// other when it fails and the other can run.
     public var engine = Engine.onDevice
-    /// Clean up on-device transcripts with Apple Intelligence: punctuation,
-    /// filler words, false starts. OpenAI's transcripts don't need it.
-    public var refine = true
+    /// What cleans up a transcript, from either engine: punctuation, filler
+    /// words, false starts. Apple Intelligence runs on the device; the OpenAI
+    /// models need your key. See `Refiner`.
+    public var cleanup = Cleanup.appleIntelligence
 
     public enum Engine: String, Codable, Sendable, CaseIterable {
         case onDevice, openAI
+    }
+
+    public enum Cleanup: String, Codable, Sendable, CaseIterable {
+        case appleIntelligence, openAIFast, openAISmart, off
     }
 
     /// `key` as a key, or nil when the name is not one Yap knows.
@@ -68,10 +73,15 @@ public struct Config: Codable, Equatable, Sendable {
         engine =
             (try? container.decodeIfPresent(Engine.self, forKey: .engine))
             .flatMap { $0 } ?? defaults.engine
-        refine =
-            try container.decodeIfPresent(Bool.self, forKey: .refine)
-            ?? defaults.refine
+        // Before `cleanup` there was `"refine": false` to turn it off.
+        let refined = try decoder.container(keyedBy: Legacy.self)
+            .decodeIfPresent(Bool.self, forKey: .refine)
+        cleanup =
+            (try? container.decodeIfPresent(Cleanup.self, forKey: .cleanup)).flatMap { $0 }
+            ?? (refined == false ? .off : defaults.cleanup)
     }
+
+    private enum Legacy: String, CodingKey { case refine }
 
     /// The file's settings, or the defaults when it is missing. A file that
     /// will not parse is reported rather than silently replaced, since it is
