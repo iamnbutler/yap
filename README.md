@@ -45,7 +45,7 @@ auto blog => autoblog
 
 ## Overlay
 
-While you talk, a panel at the bottom of the screen shows a waveform and what Yap has heard so far. At each pause, the last phrase is transcribed and added to it. On send, the whole clip is transcribed again and replaces the preview, and that version is what gets typed. The preview is only for watching, so a chunk that fails costs nothing. The panel never takes focus or clicks, so typing still goes to the app you were in.
+While you talk, a panel in the top-right corner, where notifications show, shows a waveform and what Yap has heard so far. At each pause, the last phrase is transcribed and added to it. On send, the whole clip is transcribed again and replaces the preview, and that version is what gets typed. The preview is only for watching, so a chunk that fails costs nothing. The panel never takes focus or clicks, so typing still goes to the app you were in.
 
 With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview comes from the same live transcription that gets typed, and costs nothing. Set `"overlay": false` in `config.json` to turn it off.
 
