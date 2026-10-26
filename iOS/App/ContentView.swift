@@ -175,13 +175,19 @@ struct ContentView: View {
                 Text("This iPhone").tag(Config.Engine.onDevice)
                 Text("OpenAI").tag(Config.Engine.openAI)
             }
-            Toggle(
-                "Clean Up with Apple Intelligence",
-                isOn: Binding(get: { session.config.refine }, set: { on in session.update { $0.refine = on } })
-            )
-            .disabled(session.config.engine != .onDevice || Refiner.unavailableReason != nil)
-            if session.config.engine == .onDevice, let reason = Refiner.unavailableReason {
+            Picker(
+                "Clean Up With",
+                selection: Binding(get: { session.config.cleanup }, set: { cleanup in session.update { $0.cleanup = cleanup } })
+            ) {
+                Text("Apple Intelligence").tag(Config.Cleanup.appleIntelligence)
+                Text("OpenAI, Fast").tag(Config.Cleanup.openAIFast)
+                Text("OpenAI, Smart").tag(Config.Cleanup.openAISmart)
+                Text("Nothing").tag(Config.Cleanup.off)
+            }
+            if session.config.cleanup == .appleIntelligence, let reason = Refiner.unavailableReason {
                 Text("Clean-up is off: \(reason)").font(.footnote).foregroundStyle(.secondary)
+            } else if [.openAIFast, .openAISmart].contains(session.config.cleanup), maskedKey == nil {
+                Text("Clean-up is off until you add an OpenAI key.").font(.footnote).foregroundStyle(.secondary)
             }
             NavigationLink {
                 KeyView(maskedKey: $maskedKey)

@@ -70,12 +70,51 @@ struct YapMenu: View {
             isOn: Binding(get: { yap.keepsTranscripts }, set: { yap.keepsTranscripts = $0 }))
 
         Divider()
+        Picker(
+            "Transcribe With",
+            selection: Binding(get: { yap.engine }, set: { yap.engine = $0 })
+        ) {
+            Text("This Mac\(Self.note(for: yap.speechModel))").tag(Config.Engine.onDevice)
+            Text("OpenAI").tag(Config.Engine.openAI)
+        }
+        Picker(
+            "Clean Up With",
+            selection: Binding(get: { yap.cleanup }, set: { yap.cleanup = $0 })
+        ) {
+            Text("Apple Intelligence").tag(Config.Cleanup.appleIntelligence)
+                .disabled(yap.refinerUnavailable != nil)
+            Text("OpenAI, Fast (GPT-6 Luna)").tag(Config.Cleanup.openAIFast)
+                .disabled(!yap.hasOpenAIKey)
+            Text("OpenAI, Smart (GPT-6.1 Sol)").tag(Config.Cleanup.openAISmart)
+                .disabled(!yap.hasOpenAIKey)
+            Text("Nothing").tag(Config.Cleanup.off)
+            if let reason = yap.refinerUnavailable {
+                Divider()
+                Text(reason)
+            }
+            if !yap.hasOpenAIKey {
+                Divider()
+                Text("OpenAI needs a key in secrets.env.")
+            }
+        }
+
+        Divider()
         Button("Edit Dictionary…") { openDictionary() }
         Button("Edit Settings…") { yap.openConfig() }
 
         Divider()
         Button("Quit Yap") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    /// What stands between the speech model and dictating, if anything.
+    static func note(for model: OnDeviceTranscription.Availability?) -> String {
+        switch model {
+        case .downloadable: " (Not Downloaded)"
+        case .downloading: " (Downloading…)"
+        case .unsupported: " (Not for This Language)"
+        case .installed, nil: ""
+        }
     }
 
     /// One line: the time, a warning when it never reached its app, and as much

@@ -1,8 +1,9 @@
 import Foundation
 import FoundationModels
 
-/// Cleans up a transcript with Apple's on-device language model: punctuation,
-/// filler words, false starts, and the dictionary's spellings.
+/// Cleans up a transcript with a language model: Apple's on-device one, or
+/// one of OpenAI's (`OpenAICleanup`). Punctuation, filler words, false
+/// starts, and the dictionary's spellings.
 ///
 /// The risk with a language model here is that it does what you said instead
 /// of writing it down: dictate "write me a function that sorts a list" and a
@@ -23,29 +24,48 @@ public enum Refiner {
     }
 
     /// `text`, refined where the model could, a chunk at a time. Never
-    /// throws: a chunk that fails is kept as heard.
-    public static func refine(_ text: String, terms: [String] = []) async -> String {
-        guard unavailableReason == nil else { return text }
+    /// throws: a chunk that fails is kept as heard, and so is all of it when
+    /// the model can't run (Apple Intelligence off, no OpenAI key).
+    public static func refine(
+        _ text: String, terms: [String] = [], with cleanup: Config.Cleanup = .appleIntelligence,
+        apiKey: String? = nil
+    ) async -> String {
+        let instructions = instructions(terms: terms)
+        let clean: (String) async -> String?
+        switch cleanup {
+        case .off:
+            return text
+        case .appleIntelligence:
+            guard unavailableReason == nil else { return text }
+            clean = { await refine(chunk: $0, instructions: instructions) }
+        case .openAIFast, .openAISmart:
+            guard let apiKey, let model = OpenAICleanup(cleanup, apiKey: apiKey) else { return text }
+            clean = { try? await model.clean($0, instructions: instructions) }
+        }
         var refined: [String] = []
         for chunk in chunks(of: text) {
-            refined.append(await refine(chunk: chunk, terms: terms) ?? chunk)
+            let cleaned = await clean(chunk)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let cleaned, accepts(raw: chunk, refined: cleaned, terms: terms) {
+                refined.append(cleaned)
+            } else {
+                refined.append(chunk)
+            }
         }
         return refined.joined(separator: " ")
     }
 
-    private static func refine(chunk: String, terms: [String]) async -> String? {
+    private static func refine(chunk: String, instructions: String) async -> String? {
         // A new session per chunk: each starts with an empty context window,
         // and a chunk can't be steered by the last one's text.
         let session = LanguageModelSession(
             model: SystemLanguageModel(guardrails: .permissiveContentTransformations),
-            instructions: instructions(terms: terms))
+            instructions: instructions)
         do {
             let response = try await session.respond(
                 to: "<dictation>\n\(chunk)\n</dictation>",
                 generating: Cleaned.self,
                 options: GenerationOptions(sampling: .greedy))
-            let cleaned = response.content.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return accepts(raw: chunk, refined: cleaned, terms: terms) ? cleaned : nil
+            return response.content.text
         } catch {
             return nil
         }

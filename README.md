@@ -1,6 +1,6 @@
 # yap
 
-Dictation for the Mac (and now the iPhone), built for talking to Claude Code. Hold **Right Command**, talk, let go: OpenAI transcribes it and Yap types the text into whichever app was in front.
+Dictation for the Mac (and now the iPhone), built for talking to Claude Code. Hold **Right Command**, talk, let go: Yap transcribes it, on the Mac or with OpenAI, and types the text into whichever app was in front.
 
 - **Hold** Right Command to talk; release to send.
 - **Tap** it (under 0.3 s) to record hands free, then tap again to send. A *Tink* starts it and a *Pop* ends it. It sends on its own after 10 minutes.
@@ -21,7 +21,7 @@ Building it yourself? `project.yml` signs with my Apple team (`DEVELOPMENT_TEAM`
 
 Grant Accessibility (to hear the key and type) and Microphone when asked. The menu bar icon's menu tells you if Accessibility is missing.
 
-Put an OpenAI key in `~/Library/Application Support/yap/secrets.env` (mode 600):
+To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), put a key in `~/Library/Application Support/yap/secrets.env` (mode 600):
 
 ```
 OPENAI_API_KEY=sk-...
@@ -47,7 +47,27 @@ auto blog => autoblog
 
 While you talk, a panel at the bottom of the screen shows a waveform and what Yap has heard so far. At each pause, the last phrase is transcribed and added to it. On send, the whole clip is transcribed again and replaces the preview, and that version is what gets typed. The preview is only for watching, so a chunk that fails costs nothing. The panel never takes focus or clicks, so typing still goes to the app you were in.
 
-The chunks roughly double the audio sent to OpenAI. Set `"overlay": false` in `config.json` to turn it off.
+With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview comes from the same live transcription that gets typed, and costs nothing. Set `"overlay": false` in `config.json` to turn it off.
+
+## On the Mac, or OpenAI
+
+**Transcribe With** in the menu picks the engine (`"engine"` in `config.json`: `onDevice` or `openAI`):
+
+- **This Mac**: Apple's speech model (SpeechAnalyzer), with no key and no network. Yap downloads the model for your language the first time; the menu says while it is downloading. It transcribes while you talk, so the text is ready a fraction of a second after you let go.
+- **OpenAI**: better with jargon, billed to your key.
+
+Either falls back to the other when it fails, and the status line says so.
+
+**Clean Up With** then fixes punctuation, filler words, false starts and "no wait, I mean…" corrections, whichever engine transcribed (`"cleanup"` in `config.json`):
+
+| | `cleanup` | Time for a sentence |
+|---|---|---|
+| **Apple Intelligence** | `appleIntelligence` (default) | ~1.3 s, on the device; needs Apple Intelligence on |
+| **OpenAI, Fast** (GPT-6 Luna) | `openAIFast` | ~1.2–1.9 s; the best of the three in testing |
+| **OpenAI, Smart** (GPT-6.1 Sol) | `openAISmart` | ~2.5–5 s |
+| **Nothing** | `off` | |
+
+All three have the same guards (see [On device, or OpenAI](#on-device-or-openai)): a rewrite that adds what wasn't said, or drops most of what was, is thrown away, and any failure types the text as heard. The OpenAI models also get the dictionary's terms as spellings.
 
 ## Transcripts
 
@@ -101,7 +121,7 @@ Setup on the phone: install Yap, then turn it on under **Settings › Apps › Y
 
 ### On device, or OpenAI
 
-By default the iPhone transcribes on the phone with Apple's speech model, which needs no key and keeps the audio on the phone. The app downloads the model the first time it opens. Then Apple Intelligence cleans up the text: punctuation, filler words, false starts, and "no wait, I mean…" corrections. Clean-up can only improve a transcript or leave it alone:
+By default the iPhone transcribes on the phone with Apple's speech model, which needs no key and keeps the audio on the phone. The app downloads the model the first time it opens. Then Apple Intelligence cleans up the text (or an OpenAI model, under **Clean Up With**): punctuation, filler words, false starts, and "no wait, I mean…" corrections. Clean-up can only improve a transcript or leave it alone:
 
 - A rewrite that adds words that weren't said is thrown away. A small model asked to tidy "what's the capital of France?" is tempted to answer it (`Refiner.accepts`).
 - So is one that drops more than half of what was said.
