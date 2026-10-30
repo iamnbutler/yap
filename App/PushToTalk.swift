@@ -1,5 +1,6 @@
 import AppKit
 import Core
+import os
 
 /// Watches the dictation key: press, release, and whether another key went
 /// down while it was held.
@@ -29,6 +30,10 @@ final class PushToTalk {
 
     private var monitors: [Any] = []
     private var isDown = false
+
+    /// `log stream --predicate 'subsystem == "dev.yap.Yap"'` shows each press,
+    /// so a press that did nothing can be told from one that was never heard.
+    private static let log = Logger(subsystem: "dev.yap.Yap", category: "hotkey")
 
     /// Global key monitoring requires Accessibility. Prompts once if not granted.
     @discardableResult
@@ -65,6 +70,7 @@ final class PushToTalk {
         case .keyUp where ours && !hotkey.isModifier:
             set(down: false)
         case .keyDown where isDown:
+            Self.log.info("Chord: key \(event.keyCode) during the hold")
             onChord?()
         default:
             break
@@ -74,6 +80,7 @@ final class PushToTalk {
     private func set(down: Bool) {
         guard down != isDown else { return }
         isDown = down
+        Self.log.info("\(self.hotkey.name, privacy: .public) \(down ? "down" : "up", privacy: .public)")
         down ? onDown?() : onUp?()
     }
 }

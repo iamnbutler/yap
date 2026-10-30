@@ -109,6 +109,14 @@ final class HotkeyTests: XCTestCase {
         XCTAssertTrue(Hotkey("leftShift")?.isModifier == true)
     }
 
+    func testEachSideHasItsOwnFlag() {
+        // Releasing Right Command while Left Command is held must still read
+        // as a release, so the two cannot share the Command flag.
+        XCTAssertEqual(Hotkey.rightCommand.modifierFlag, 0x10)
+        XCTAssertEqual(Hotkey("leftCommand")?.modifierFlag, 0x08)
+        XCTAssertNotEqual(Hotkey("rightOption")?.modifierFlag, Hotkey("leftOption")?.modifierFlag)
+    }
+
     func testOrdinaryKeys() {
         let f13 = Hotkey("F13")
         XCTAssertEqual(f13?.keyCode, 105)
