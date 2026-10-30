@@ -9,8 +9,10 @@ import Foundation
 public struct Hotkey: Equatable, Sendable {
     /// The virtual key code macOS reports for it.
     public let keyCode: UInt16
-    /// For a modifier, the `NSEvent.ModifierFlags` raw value it sets: how a
-    /// press is told from a release. Nil for an ordinary key, which has key
+    /// For a modifier, the bit it sets in `NSEvent.ModifierFlags`'s raw value:
+    /// how a press is told from a release. The bit for that side of the
+    /// keyboard, not the shared Command or Option flag, which stays set while
+    /// the other side's key is held. Nil for an ordinary key, which has key
     /// down and key up events instead.
     public let modifierFlag: UInt?
     /// For the menu and status text: "Right Command", "F13".
@@ -18,25 +20,30 @@ public struct Hotkey: Equatable, Sendable {
 
     public var isModifier: Bool { modifierFlag != nil }
 
-    public static let rightCommand = Hotkey(keyCode: 54, modifierFlag: command, name: "Right Command")
+    public static let rightCommand = Hotkey(keyCode: 54, modifierFlag: rightCommandMask, name: "Right Command")
 
-    // NSEvent.ModifierFlags raw values, so Core needs no AppKit.
-    private static let shift: UInt = 1 << 17
-    private static let control: UInt = 1 << 18
-    private static let option: UInt = 1 << 19
-    private static let command: UInt = 1 << 20
+    // IOKit's NX_DEVICE*KEYMASK values, which NSEvent keeps in the low bits
+    // of its modifier flags. fn has no sides, so it uses its own flag.
+    private static let leftControlMask: UInt = 0x0001
+    private static let leftShiftMask: UInt = 0x0002
+    private static let rightShiftMask: UInt = 0x0004
+    private static let leftCommandMask: UInt = 0x0008
+    private static let rightCommandMask: UInt = 0x0010
+    private static let leftOptionMask: UInt = 0x0020
+    private static let rightOptionMask: UInt = 0x0040
+    private static let rightControlMask: UInt = 0x2000
     private static let function: UInt = 1 << 23
 
     private static let modifiers: [String: Hotkey] = {
         let keys = [
-            Hotkey(keyCode: 54, modifierFlag: command, name: "Right Command"),
-            Hotkey(keyCode: 55, modifierFlag: command, name: "Left Command"),
-            Hotkey(keyCode: 61, modifierFlag: option, name: "Right Option"),
-            Hotkey(keyCode: 58, modifierFlag: option, name: "Left Option"),
-            Hotkey(keyCode: 62, modifierFlag: control, name: "Right Control"),
-            Hotkey(keyCode: 59, modifierFlag: control, name: "Left Control"),
-            Hotkey(keyCode: 60, modifierFlag: shift, name: "Right Shift"),
-            Hotkey(keyCode: 56, modifierFlag: shift, name: "Left Shift"),
+            rightCommand,
+            Hotkey(keyCode: 55, modifierFlag: leftCommandMask, name: "Left Command"),
+            Hotkey(keyCode: 61, modifierFlag: rightOptionMask, name: "Right Option"),
+            Hotkey(keyCode: 58, modifierFlag: leftOptionMask, name: "Left Option"),
+            Hotkey(keyCode: 62, modifierFlag: rightControlMask, name: "Right Control"),
+            Hotkey(keyCode: 59, modifierFlag: leftControlMask, name: "Left Control"),
+            Hotkey(keyCode: 60, modifierFlag: rightShiftMask, name: "Right Shift"),
+            Hotkey(keyCode: 56, modifierFlag: leftShiftMask, name: "Left Shift"),
             Hotkey(keyCode: 63, modifierFlag: function, name: "fn"),
         ]
         var byName: [String: Hotkey] = [:]
