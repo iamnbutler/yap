@@ -51,6 +51,20 @@ While you talk, a panel in the top-right corner, where notifications show, shows
 
 With OpenAI, the chunks roughly double the audio sent. On the Mac, the preview comes from the same live transcription that gets typed, and costs nothing. Set `"overlay": false` in `config.json` to turn it off.
 
+## Mic Check
+
+**Check Microphone…** in the menu opens a window that listens to the default input the way dictation does (16 kHz) and says what to change. Talk normally, with pauses between sentences; the verdicts settle after a few seconds of speech and cover the last 15.
+
+| Row | Measured from | Tells you |
+|---|---|---|
+| Gain | Typical speech level in dBFS (aim for −34 to −10), and clipping | Turn the input volume up or down. The slider sets it, when the device has one. |
+| Distance | How far words fall in the 100 ms after they end (**FALL**). Close up, the voice stops dead; far away, the room rings on, and turning the gain up raises the room too | Move closer. Dry speech fell 23–26 dB; under 19 is roomy, under 13 is far. |
+| Room | Speech against the level between words (**S/N**) | Background noise. |
+| Aim | Treble (2–5 kHz) against body (150–400 Hz) (**TONE**). Talking past a mic dulls it first | Face the mic. Voices differ by more than aim does, so watch it change as you turn your head. |
+| Direction | Level and arrival time between channels, on a two-channel input only | Which side you're on. A single mic, like most built-in ones, can't tell. |
+
+The thresholds come from macOS voices played dry and through simulated rooms, not from a room you've measured, so treat them as a guide. `YAP_MIC_CHECK=1` opens the window at launch.
+
 ## On the Mac, or OpenAI
 
 **Transcribe With** in the menu picks the engine (`"engine"` in `config.json`: `onDevice` or `openAI`):
@@ -150,7 +164,7 @@ make testflight   # archive and upload; needs your account in Xcode › Settings
 |---|---|
 | `App` | The menu bar app: the hotkey, mic capture, typing into other apps. |
 | `iOS/App`, `iOS/Keyboard` | The iPhone app and its keyboard extension. They share `AudioCapture` and `PCMRecorder` with the Mac app. |
-| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, key lookup, and the app–keyboard bridge. |
+| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, key lookup, the app–keyboard bridge, and Mic Check's analysis. |
 | `project.yml` | XcodeGen spec. Run `make generate` before opening the project in Xcode. |
 
 `make test` runs the Core tests.

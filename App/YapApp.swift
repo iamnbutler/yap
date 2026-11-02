@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct YapApp: App {
     @State private var yap = Yap()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         // The task lives on the label, not the content: the label is drawn at
@@ -13,11 +14,27 @@ struct YapApp: App {
             YapMenu(yap: yap)
         } label: {
             Image(systemName: icon)
-                .task { yap.start() }
+                .task {
+                    yap.start()
+                    // YAP_MIC_CHECK=1 opens Mic Check at launch, to look at
+                    // it without the menu.
+                    if ProcessInfo.processInfo.environment["YAP_MIC_CHECK"] != nil {
+                        openWindow(id: MicCheckView.id)
+                    }
+                }
         }
         // A native menu, not a panel: only a native menu has submenus, and
         // Recent Transcripts is one.
         .menuBarExtraStyle(.menu)
+
+        // Opened from the menu only; a menu bar app shows nothing at launch.
+        Window("Mic Check", id: MicCheckView.id) {
+            MicCheckView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
     }
 
     private var icon: String {
@@ -31,6 +48,7 @@ struct YapApp: App {
 
 struct YapMenu: View {
     let yap: Yap
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Text(yap.detail)
@@ -99,6 +117,11 @@ struct YapMenu: View {
         }
 
         Divider()
+        Button("Check Microphone…") {
+            openWindow(id: MicCheckView.id)
+            // No Dock icon, so nothing else brings the window forward.
+            NSApp.activate()
+        }
         Button("Edit Dictionary…") { openDictionary() }
         Button("Edit Settings…") { yap.openConfig() }
 
