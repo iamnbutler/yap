@@ -94,7 +94,17 @@ struct YapMenu: View {
             }
             if !yap.hasOpenAIKey {
                 Divider()
-                Text("OpenAI needs a key in secrets.env.")
+                Text("OpenAI needs a key: see OpenAI Key below.")
+            }
+        }
+
+        Menu(yap.hasOpenAIKey ? "OpenAI Key: Set" : "OpenAI Key: Not Set") {
+            Button(yap.hasStoredOpenAIKey ? "Replace Key…" : "Set Key…") { yap.editOpenAIKey() }
+            Button("Remove Key…") { yap.removeOpenAIKey() }
+                .disabled(!yap.hasStoredOpenAIKey)
+            if yap.openAIKeyFromEnvironment {
+                Divider()
+                Text("Using OPENAI_API_KEY from the environment")
             }
         }
 

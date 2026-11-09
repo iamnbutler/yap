@@ -21,7 +21,8 @@ public enum Paths {
             .appendingPathComponent("yap", isDirectory: true)
     }
 
-    /// Local secrets as `KEY=value` lines. Mode 600, never in the repo.
+    /// Where older versions kept the OpenAI key, as `KEY=value` lines. Read
+    /// only to move the key into the Keychain (`Secrets.migrateOpenAIKey`).
     public static var secretsFile: URL {
         support.appendingPathComponent("secrets.env")
     }
