@@ -3,9 +3,10 @@ id: 01M5NTN3V39MA9QBR8GAX3DBN2
 anchor: '@file'
 created: 2026-10-24T02:08:22Z
 norm: '1'
-sig: 55aac2c2aa641984
-body_hash: cf238c72524d3bcf
-raw_hash: 03fed50a04ed15b0
+sig: aa373ef4b6511c68
+body_hash: 90ce3e8f50e26b7f
+raw_hash: d21c30df3858773f
+vouched: 2026-11-09T15:59:55Z
 lines: 1-50
 ---
 

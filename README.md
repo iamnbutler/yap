@@ -23,13 +23,13 @@ Building it yourself? `project.yml` signs with my Apple team (`DEVELOPMENT_TEAM`
 
 Grant Accessibility (to hear the key and type) and Microphone when asked. The menu bar icon's menu tells you if Accessibility is missing.
 
-To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), put a key in `~/Library/Application Support/yap/secrets.env` (mode 600):
+To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), choose **OpenAI Key › Set Key…** in the menu and paste a key. Yap keeps it in your login Keychain (a generic password, service `dev.yap.Yap`, account `OPENAI_API_KEY`), never on disk in the clear. The menu says **OpenAI Key: Set** or **Not Set**, never the key. **Replace Key…** and **Remove Key…** are in the same submenu, and a new key applies to the next clip without a relaunch.
 
-```
-OPENAI_API_KEY=sk-...
-```
+For development, `OPENAI_API_KEY` in the environment wins over the Keychain.
 
-`OPENAI_API_KEY` in the environment wins over the file. The file is read on every clip, so a new key needs no relaunch.
+Older versions read the key from `~/Library/Application Support/yap/secrets.env`. On first launch Yap moves that key into the Keychain and takes it out of the file, deleting the file when nothing else is left in it (`make logs` shows a line when it does). If the Keychain already has a key, that key wins and the file's copy is just removed.
+
+The Keychain item trusts Yap by its signature's designated requirement (bundle id and signing certificate), not by the build, so rebuilding with the same certificate reads it without a prompt. A build signed with a different certificate (a Developer ID release after an Apple Development build, or the other way round) asks once. Choose **Always Allow**.
 
 ## Dictionary
 
@@ -150,7 +150,7 @@ make testflight   # archive and upload; needs your account in Xcode › Settings
 |---|---|
 | `App` | The menu bar app: the hotkey, mic capture, typing into other apps. |
 | `iOS/App`, `iOS/Keyboard` | The iPhone app and its keyboard extension. They share `AudioCapture` and `PCMRecorder` with the Mac app. |
-| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, key lookup, and the app–keyboard bridge. |
+| `Packages/Core` | Pure Swift, unit-tested: the OpenAI request, WAV encoding, the dictionary, the Keychain key and its migration, and the app–keyboard bridge. |
 | `project.yml` | XcodeGen spec. Run `make generate` before opening the project in Xcode. |
 
 `make test` runs the Core tests.

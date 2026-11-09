@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import AppKit
 import Core
+import OSLog
 import Observation
 import Synchronization
 
@@ -67,6 +68,12 @@ final class Yap {
     private(set) var refinerUnavailable: String?
     /// Whether there is an OpenAI key, which its engine and clean-up need.
     private(set) var hasOpenAIKey = false
+    /// Whether the key is in the Keychain, which the menu can replace and
+    /// remove, rather than only in the environment.
+    private(set) var hasStoredOpenAIKey = false
+    /// `OPENAI_API_KEY` in the environment, which wins over the Keychain.
+    let openAIKeyFromEnvironment = Secrets.openAIKeyFromEnvironment()
+    private static let secretsLog = Logger(subsystem: "dev.yap.Yap", category: "secrets")
     @ObservationIgnored private var installing = false
 
     var keepsTranscripts: Bool {
@@ -210,6 +217,7 @@ final class Yap {
         key.onUp = { [weak self] in self?.end() }
         key.onChord = { [weak self] in self?.chorded = true }
         key.start()
+        migrateSecrets()
         watchConfig()
         refreshModels()
         if config.engine == .onDevice { prepareSpeechModel() }
@@ -237,9 +245,83 @@ final class Yap {
     /// Re-measured when the menu opens, like Accessibility.
     func refreshModels() {
         refinerUnavailable = Refiner.unavailableReason
-        hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
+        refreshOpenAIKey()
         guard !installing else { return }
         Task { speechModel = await OnDeviceTranscription.availability() }
+    }
+
+    /// Checks for a key without reading it, so this never prompts.
+    private func refreshOpenAIKey() {
+        hasStoredOpenAIKey = Secrets.openAIKeychain.exists
+        hasOpenAIKey = openAIKeyFromEnvironment || hasStoredOpenAIKey
+    }
+
+    /// Moves a key out of the old secrets.env into the Keychain, once.
+    private func migrateSecrets() {
+        let file = Paths.secretsFile
+        do {
+            switch try Secrets.migrateOpenAIKey(from: file) {
+            case .nothing: break
+            case .imported:
+                Self.secretsLog.notice("Moved OPENAI_API_KEY from \(file.path, privacy: .public) into the Keychain")
+            case .dropped:
+                Self.secretsLog.notice("Removed OPENAI_API_KEY from \(file.path, privacy: .public); the Keychain already had one")
+            }
+        } catch {
+            Self.secretsLog.error("Couldn't move OPENAI_API_KEY into the Keychain: \(error.localizedDescription, privacy: .public)")
+            detail = "Couldn't move the OpenAI key into the Keychain: \(error.localizedDescription)"
+        }
+        refreshOpenAIKey()
+    }
+
+    /// Asks for a key in a secure field and saves it to the Keychain. After
+    /// the menu has closed: a modal alert inside a menu's tracking loop never
+    /// gets the keyboard.
+    func editOpenAIKey() {
+        DispatchQueue.main.async { [self] in
+            let alert = NSAlert()
+            alert.messageText = hasStoredOpenAIKey ? "Replace the OpenAI key" : "Set an OpenAI key"
+            alert.informativeText =
+                "Yap keeps it in your login Keychain and only sends it to OpenAI. Create one at platform.openai.com/api-keys."
+            let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+            field.placeholderString = "sk-…"
+            alert.accessoryView = field
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Cancel")
+            alert.window.initialFirstResponder = field
+            NSApp.activate()
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            do {
+                try Secrets.openAIKeychain.save(key)
+                Self.secretsLog.notice("Saved an OpenAI key to the Keychain")
+                detail = "Saved the OpenAI key"
+            } catch {
+                detail = "Couldn't save the OpenAI key: \(error.localizedDescription)"
+            }
+            refreshOpenAIKey()
+        }
+    }
+
+    func removeOpenAIKey() {
+        DispatchQueue.main.async { [self] in
+            let alert = NSAlert()
+            alert.messageText = "Remove the OpenAI key?"
+            alert.informativeText = "Yap will transcribe and clean up without OpenAI until you set another."
+            alert.addButton(withTitle: "Remove")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate()
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            do {
+                try Secrets.openAIKeychain.delete()
+                Self.secretsLog.notice("Removed the OpenAI key from the Keychain")
+                detail = "Removed the OpenAI key"
+            } catch {
+                detail = "Couldn't remove the OpenAI key: \(error.localizedDescription)"
+            }
+            refreshOpenAIKey()
+        }
     }
 
     /// Reads config.json and applies it: the key changes at once, everything
@@ -278,7 +360,7 @@ final class Yap {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 self.refinerUnavailable = Refiner.unavailableReason
-                self.hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
+                self.refreshOpenAIKey()
                 let now = modified()
                 guard now != last else { continue }
                 last = now
@@ -416,7 +498,7 @@ final class Yap {
             return dictionary.apply(to: heard)
         }
         let openAI = { () async throws -> String in
-            // Read per clip, so a key changed in secrets.env needs no relaunch.
+            // Read per clip, so a key set from the menu applies to the next one.
             let client = OpenAITranscription(
                 apiKey: try Secrets.openAIAPIKey(), model: model, prompt: dictionary.prompt)
             let heard = try await client.transcribe(
@@ -453,7 +535,10 @@ final class Yap {
                     detail = "Cleaning up…"
                     let refined = await Refiner.refine(
                         text, terms: dictionary.terms, with: config.cleanup,
-                        apiKey: try? Secrets.openAIAPIKey())
+                        // Only OpenAI clean-up needs the key; don't touch the
+                        // Keychain for the others.
+                        apiKey: [.openAIFast, .openAISmart].contains(config.cleanup)
+                            ? try? Secrets.openAIAPIKey() : nil)
                     // Fixes again after: the refiner may respell a word they fix.
                     text = dictionary.apply(to: refined).trimmingCharacters(in: .whitespacesAndNewlines)
                 }
