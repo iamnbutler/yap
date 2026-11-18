@@ -29,6 +29,7 @@ final class Overlay {
         owner = recording
         hiding?.cancel()
         model.text = ""
+        model.warning = nil
         model.phase = .listening
         model.started = .now
         model.stopped = nil
@@ -43,8 +44,16 @@ final class Overlay {
         if let phase { model.phase = phase }
         if let text { model.text = text }
         renderer.active = model.phase == .listening || model.phase == .handsFree
+        // Only while listening: once the clip is sent, the mic no longer matters.
+        if !renderer.active { model.warning = nil }
         renderer.tint = model.tint
         if !renderer.active, model.stopped == nil { model.stopped = .now }
+    }
+
+    /// Nothing is being heard, and why if that is known; nil clears it.
+    func warn(_ recording: Int, _ message: String?) {
+        guard recording == owner, renderer.active, model.warning != message else { return }
+        model.warning = message
     }
 
     /// A chunk was cut `seconds` into the recording: an orange mark on the tape.
@@ -188,6 +197,8 @@ final class OverlayModel {
 
     var phase = Phase.listening
     var text = ""
+    /// Shown while recording when nothing is being heard: a muted mic.
+    var warning: String?
     var started = Date.now
     /// When the recording ended; the clock stops there.
     var stopped: Date?
@@ -240,6 +251,22 @@ struct OverlayView: View {
                         .foregroundStyle(Palette.cream)
                 }
             }
+            if let warning = model.warning {
+                HStack(spacing: 7) {
+                    Image(systemName: "mic.slash.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(warning)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(Palette.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
+                .transition(.opacity)
+            }
             WaveView(renderer: renderer)
                 .frame(height: 58)
             if !model.text.isEmpty {
@@ -265,6 +292,7 @@ struct OverlayView: View {
         .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
         .padding(Self.margin)
         .animation(.easeOut(duration: 0.15), value: model.text)
+        .animation(.easeOut(duration: 0.15), value: model.warning)
     }
 
     private var tail: String {

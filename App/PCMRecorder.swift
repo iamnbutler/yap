@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import Core
 import Synchronization
 
 /// Collects PCM16 from the realtime audio thread.
@@ -9,13 +10,18 @@ import Synchronization
 final class PCMRecorder: Sendable {
     private let data = Mutex(Data())
     private let loudness = Mutex(Float(0))
+    private let quiet = Mutex(SilenceWatch())
 
     /// The latest buffer's loudness, 0 to 1, for the overlay's waveform.
     var level: Float { loudness.withLock { $0 } }
 
+    /// How long the input has been digital silence, for the mute warning.
+    var silence: SilenceWatch { quiet.withLock { $0 } }
+
     func reset() {
         data.withLock { $0 = Data() }
         loudness.withLock { $0 = 0 }
+        quiet.withLock { $0 = SilenceWatch() }
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -35,6 +41,10 @@ final class PCMRecorder: Sendable {
         }
         let rms = (sum / Float(frames)).squareRoot()
         loudness.withLock { $0 = min(1, (rms * 6).squareRoot()) }
+
+        let peak = SilenceWatch.peak(of: UnsafeBufferPointer(start: channel[0], count: frames))
+        let seconds = Double(frames) / buffer.format.sampleRate
+        quiet.withLock { $0.feed(peak: peak, seconds: seconds) }
     }
 
     /// Everything recorded after the first `offset` bytes, without taking it.
