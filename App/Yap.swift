@@ -124,6 +124,10 @@ final class Yap {
     /// Transcribes on the Mac as you talk, when that is the engine; its
     /// preview feeds the overlay, and its result is what gets typed.
     @ObservationIgnored private var clip: OnDeviceClip?
+    /// Warns, while recording, when the mic gives nothing.
+    @ObservationIgnored private var silence: Task<Void, Never>?
+    /// The last thing it said, kept for the menu if the clip comes back empty.
+    @ObservationIgnored private var silenceWarning: String?
     @ObservationIgnored private var demo: Overlay?
     @ObservationIgnored private var target: NSRunningApplication?
     @ObservationIgnored private var chorded = false
@@ -316,6 +320,7 @@ final class Yap {
             state = .recording
             detail = "Listening…"
             if config.overlay { overlay.begin(recording) }
+            watchSilence()
             if config.engine == .onDevice {
                 let shown = recording
                 let showing = config.overlay
@@ -382,10 +387,12 @@ final class Yap {
             overlay.hide(shown)
             return finish("Too short to send")
         }
+        let warned = silenceWarning
+        stopWatchingSilence()
         guard PCMRecorder.peak(of: samples) >= Self.silencePeak else {
             clip?.cancel()
             overlay.hide(shown)
-            return finish("Heard nothing")
+            return finish(warned.map { "Heard nothing: \($0)" } ?? "Heard nothing")
         }
         guard let pid = target?.processIdentifier else {
             clip?.cancel()
@@ -539,7 +546,37 @@ final class Yap {
         }
     }
 
+    /// Five times a second: whether the device says it is muted, and whether
+    /// the input has been digital silence for too long. Never stops the
+    /// recording; it only says so.
+    private func watchSilence() {
+        stopWatchingSilence()
+        let shown = recording
+        let started = ContinuousClock.now
+        silence = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let self, self.recording == shown, self.state == .recording else { return }
+                let elapsed = started.duration(to: .now) / .seconds(1)
+                let warning = self.recorder.silence.warning(muted: InputMute.reason(), elapsed: elapsed)
+                if warning != self.silenceWarning {
+                    self.silenceWarning = warning
+                    self.detail = warning ?? (self.latched
+                        ? "Recording hands free. Tap \(self.keyName) to send." : "Listening…")
+                }
+                if self.config.overlay { self.overlay.warn(shown, warning) }
+            }
+        }
+    }
+
+    private func stopWatchingSilence() {
+        silence?.cancel()
+        silence = nil
+        silenceWarning = nil
+    }
+
     private func stopLive() {
+        stopWatchingSilence()
         live?.cancel()
         live = nil
         clip?.cancel()
