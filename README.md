@@ -23,13 +23,19 @@ Building it yourself? `project.yml` signs with my Apple team (`DEVELOPMENT_TEAM`
 
 Grant Accessibility (to hear the key and type) and Microphone when asked. The menu bar icon's menu tells you if Accessibility is missing.
 
-To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), put a key in `~/Library/Application Support/yap/secrets.env` (mode 600):
+To use OpenAI (optional; see [On the Mac, or OpenAI](#on-the-mac-or-openai)), choose **Set OpenAI Key…** in the menu, or add the key to your login Keychain yourself:
 
-```
-OPENAI_API_KEY=sk-...
+```sh
+security add-generic-password -a "$USER" -s OPENAI_API_KEY -w sk-...
 ```
 
-`OPENAI_API_KEY` in the environment wins over the file. The file is read on every clip, so a new key needs no relaunch.
+Yap looks for the key in this order, on every clip, so a new key needs no relaunch:
+
+1. `OPENAI_API_KEY` in the environment (only when Yap was started from a shell; not at login).
+2. The login Keychain item with service `OPENAI_API_KEY` and account your user name. The same item works for a shell: `export OPENAI_API_KEY=$(security find-generic-password -a "$USER" -s OPENAI_API_KEY -w)`.
+3. `OPENAI_API_KEY=sk-...` in `~/Library/Application Support/yap/secrets.env` (mode 600), kept for setups that already use it.
+
+The first time Yap reads a Keychain item that `security` or another app made, macOS asks "Yap wants to use your confidential information stored in "OPENAI_API_KEY" in your keychain." Enter your login password and choose **Always Allow**. The grant follows Yap's signing certificate, so it holds across rebuilds and updates. If you chose Deny, Yap says so; allow it under the item's **Access Control** in Keychain Access. An item made by **Set OpenAI Key…** belongs to Yap, so it never asks, but then `security` asks instead.
 
 ## Dictionary
 
@@ -131,7 +137,7 @@ By default the iPhone transcribes on the phone with Apple's speech model, which 
 
 With the dictionary's terms, Yap uses the system dictation model (`DictationTranscriber`), because it is the one that listens for expected words. On synthetic speech it got autoblog, Tailscale, next-cloud, Parade and Coolify right with the terms and wrong without, while `SpeechTranscriber` ignored them. Its own punctuation is sparse, and the clean-up fills that in.
 
-An OpenAI key is optional. With one you can choose OpenAI under **Transcribe With**: it is better with jargon, and it is billed to your account. Either engine falls back to the other when it fails, and the app says when that happened. The key stays in the app's Keychain, where the keyboard can't read it.
+An OpenAI key is optional. With one you can choose OpenAI under **Transcribe With**: it is better with jargon, and it is billed to your account. Either engine falls back to the other when it fails, and the app says when that happened. On the iPhone the key stays in the app's own Keychain (not the Mac's `OPENAI_API_KEY` item, which iOS apps can't see), where the keyboard can't read it.
 
 Limits:
 

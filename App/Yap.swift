@@ -161,6 +161,18 @@ final class Yap {
         NSWorkspace.shared.open(log.directory)
     }
 
+    /// Saves the OpenAI key to the login Keychain item Yap reads, changing
+    /// it in place when it exists so `security` can still read it too.
+    func setOpenAIKey(_ key: String) {
+        do {
+            try Secrets.keychainItem.save(key)
+            hasOpenAIKey = Secrets.hasOpenAIAPIKey()
+            detail = "Saved the OpenAI key to the Keychain"
+        } catch {
+            detail = "Couldn't save the OpenAI key: \(error.localizedDescription)"
+        }
+    }
+
     /// Writes the defaults out first if there is no file yet, so there is
     /// always something to edit.
     func openConfig() {
@@ -237,7 +249,7 @@ final class Yap {
     /// Re-measured when the menu opens, like Accessibility.
     func refreshModels() {
         refinerUnavailable = Refiner.unavailableReason
-        hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
+        hasOpenAIKey = Secrets.hasOpenAIAPIKey()
         guard !installing else { return }
         Task { speechModel = await OnDeviceTranscription.availability() }
     }
@@ -278,7 +290,7 @@ final class Yap {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 self.refinerUnavailable = Refiner.unavailableReason
-                self.hasOpenAIKey = (try? Secrets.openAIAPIKey()) != nil
+                self.hasOpenAIKey = Secrets.hasOpenAIAPIKey()
                 let now = modified()
                 guard now != last else { continue }
                 last = now
@@ -416,7 +428,7 @@ final class Yap {
             return dictionary.apply(to: heard)
         }
         let openAI = { () async throws -> String in
-            // Read per clip, so a key changed in secrets.env needs no relaunch.
+            // Read per clip, so a key changed in the Keychain needs no relaunch.
             let client = OpenAITranscription(
                 apiKey: try Secrets.openAIAPIKey(), model: model, prompt: dictionary.prompt)
             let heard = try await client.transcribe(
@@ -453,7 +465,10 @@ final class Yap {
                     detail = "Cleaning up…"
                     let refined = await Refiner.refine(
                         text, terms: dictionary.terms, with: config.cleanup,
-                        apiKey: try? Secrets.openAIAPIKey())
+                        // Only for OpenAI's clean-up: reading the Keychain
+                        // can ask the user, and Apple Intelligence needs no key.
+                        apiKey: config.cleanup == .openAIFast || config.cleanup == .openAISmart
+                            ? try? Secrets.openAIAPIKey() : nil)
                     // Fixes again after: the refiner may respell a word they fix.
                     text = dictionary.apply(to: refined).trimmingCharacters(in: .whitespacesAndNewlines)
                 }

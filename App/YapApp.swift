@@ -94,13 +94,14 @@ struct YapMenu: View {
             }
             if !yap.hasOpenAIKey {
                 Divider()
-                Text("OpenAI needs a key in secrets.env.")
+                Text("OpenAI needs a key: Set OpenAI Key…, or OPENAI_API_KEY in the login Keychain.")
             }
         }
 
         Divider()
         Button("Edit Dictionary…") { openDictionary() }
         Button("Edit Settings…") { yap.openConfig() }
+        Button(yap.hasOpenAIKey ? "Change OpenAI Key…" : "Set OpenAI Key…") { askForOpenAIKey() }
 
         Divider()
         Button("Quit Yap") { NSApplication.shared.terminate(nil) }
@@ -124,6 +125,27 @@ struct YapMenu: View {
         let text = transcript.text.split(whereSeparator: \.isNewline).joined(separator: " ")
         let preview = text.count > 60 ? text.prefix(60) + "…" : Substring(text)
         return "\(time)  \(transcript.typed ? "" : "⚠︎ ")\(preview)"
+    }
+
+    /// Asks for the key in a secure field and saves it to the Keychain item
+    /// `OPENAI_API_KEY` (account: your user name), where Yap reads it.
+    private func askForOpenAIKey() {
+        let alert = NSAlert()
+        alert.messageText = "OpenAI API Key"
+        alert.informativeText =
+            "Saved in your login Keychain as OPENAI_API_KEY (account \(NSUserName())). "
+            + "macOS may ask once whether Yap may use it: choose Always Allow."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.placeholderString = "sk-…"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        yap.setOpenAIKey(key)
     }
 
     /// Creates an empty, commented dictionary on first use, so there is always
