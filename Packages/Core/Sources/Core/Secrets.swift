@@ -1,29 +1,67 @@
 import Foundation
 
-/// Resolves the OpenAI key: the environment, then `secrets.env`.
+/// Resolves the OpenAI key on the Mac: the environment, then the login
+/// Keychain, then `secrets.env`.
 ///
-/// Not the Keychain, and not 1Password: a Keychain item made by Keychain Access
-/// raises a prompt for every rebuilt signature, and `op` raises one per read.
-/// A mode-600 file in a 700 directory is the right trade for one machine.
+/// The Keychain item is the one `security` reads: service `OPENAI_API_KEY`,
+/// account the user name. A Yap started at login by launchd has no shell, so
+/// no environment key, and the Keychain is where it finds one. The item made
+/// by `security` lists only `security` as allowed to read it, so macOS asks
+/// once whether Yap may; Always Allow adds Yap, keyed on its signing
+/// certificate, which a rebuild keeps. `secrets.env` stays for setups that
+/// already use it.
 public enum Secrets {
+    public static let name = "OPENAI_API_KEY"
+
+    /// The login Keychain item that holds the key.
+    public static var keychainItem: KeychainItem {
+        KeychainItem(service: name, account: NSUserName())
+    }
+
     public static func openAIAPIKey(
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        keychain: () -> KeychainItem.Lookup = { keychainItem.lookup() },
         file: URL = Paths.secretsFile
     ) throws -> String {
-        let name = "OPENAI_API_KEY"
         if let key = environment[name], !key.isEmpty { return key }
-        if let contents = try? String(contentsOf: file, encoding: .utf8),
+        let fromKeychain = keychain()
+        if case .found(let key) = fromKeychain { return key }
+        if let key = fromFile(file) { return key }
+        throw MissingKey(item: keychainItem, file: file, denied: fromKeychain == .denied)
+    }
+
+    /// Whether a key is set anywhere, without reading the Keychain's secret,
+    /// so polling this never raises the Keychain prompt.
+    public static func hasOpenAIAPIKey(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        keychain: () -> Bool = { keychainItem.exists },
+        file: URL = Paths.secretsFile
+    ) -> Bool {
+        if let key = environment[name], !key.isEmpty { return true }
+        return keychain() || fromFile(file) != nil
+    }
+
+    private static func fromFile(_ file: URL) -> String? {
+        guard let contents = try? String(contentsOf: file, encoding: .utf8),
             let key = parseDotEnv(contents)[name], !key.isEmpty
-        {
-            return key
-        }
-        throw MissingKey(name: name, file: file)
+        else { return nil }
+        return key
     }
 
     public struct MissingKey: Error, LocalizedError {
-        let name: String
+        let item: KeychainItem
         let file: URL
-        public var errorDescription: String? { "No \(name) in the environment or \(file.path)" }
+        let denied: Bool
+
+        public var errorDescription: String? {
+            let keychain = "the login Keychain (service \(item.service), account \(item.account))"
+            if denied {
+                return "Yap isn't allowed to read \(keychain). Choose Always Allow when macOS asks, "
+                    + "or add Yap under the item's Access Control in Keychain Access."
+            }
+            return "No \(item.service) in the environment, \(keychain) or \(file.path). "
+                + "Set it with Set OpenAI Key… in the menu; macOS asks once whether Yap may use it: choose Always Allow."
+        }
     }
 
     /// Minimal .env reader: `KEY=value`, `#` comments, optional surrounding quotes.
